@@ -1,0 +1,5 @@
+{
+  "name": "Allelon - Escalas",
+  "description": "Web App responsivo para gestão e visualização de escalas de voluntários da igreja, com dashboard pessoal, calendário geral e módulo administrativo para importação de dados.",
+  "requestFramePermissions": []
+}
