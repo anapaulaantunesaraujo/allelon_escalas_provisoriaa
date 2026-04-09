@@ -138,10 +138,14 @@ function Dashboard() {
       let updatedCount = 0;
       for (const escDoc of escalasSnap.docs) {
         const esc = escDoc.data() as EscalaAtribuicao;
-        const user = users.find(u => u.apelidoPDF === esc.apelidoVoluntarioPDF);
+        const user = users.find(u => 
+          u.apelidoPDF.trim().toLowerCase() === esc.apelidoVoluntarioPDF.trim().toLowerCase()
+        );
         if (user && esc.usuarioId !== user.id) {
           await updateDoc(escDoc.ref, { usuarioId: user.id });
           updatedCount++;
+        } else if (!user) {
+          console.log(`No user found for: ${esc.apelidoVoluntarioPDF}`);
         }
       }
       toast.success(`${updatedCount} voluntários vinculados com sucesso!`);
@@ -252,7 +256,7 @@ function Dashboard() {
         skipEmptyLines: true,
         delimiter: ';',
         complete: async (results) => {
-          for (const row: any of results.data) {
+          for (const row of results.data as any[]) {
             if (row.Email) {
               await setDoc(doc(db, 'users', row.Email), {
                 nomeCompleto: row.Nome_Completo,
@@ -263,7 +267,6 @@ function Dashboard() {
               });
             }
           }
-          toast.success("Usuários importados com sucesso!");
         }
       });
     } catch (err) {
@@ -329,18 +332,44 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
         Você é um especialista em extração de dados de escalas de voluntários.
         O texto abaixo foi extraído de um PDF que contém tabelas de escalas.
         
-        Sua tarefa é identificar cada evento (data e nome do evento) e, para cada evento, listar os voluntários e suas respectivas funções com base na estrutura da tabela.
+        REGRAS DE INTERPRETAÇÃO:
+        1. NOME DO EVENTO: O nome do evento sempre aparece no topo de cada bloco, em uma barra colorida.
+        2. DATA E HORA: A data e o horário aparecem nos quadros pretos à esquerda de cada bloco.
+           - Formato de hora: Ex: "20h", "9h30".
+           - Exemplo de data/hora: "08 de Março Quarta-Feira 20h".
+        3. FUNÇÕES (CABEÇALHO): Logo abaixo do nome do evento, há uma linha cinza claro contendo os nomes das funções (ex: Vocal, Violão, Guitarra, etc.). Cada coluna nesta linha representa uma função.
+        4. VOLUNTÁRIOS: Logo abaixo de cada função, estão as células brancas com o(s) nome(s) do(s) voluntário(s).
+           - Uma função pode ter 1 ou mais voluntários (comum em "Vocal").
+           - Se houver mais de um voluntário na mesma função, liste todos eles.
+        5. LÍDERES (NEGRITO PRETO):
+           - Se o nome de um voluntário na função "Vocal" estiver em NEGRITO PRETO, ele é o "Worship leader".
+           - Se o nome de um voluntário em QUALQUER OUTRA função estiver em NEGRITO PRETO, ele é o "MD" (coordenador da banda).
+        6. BRIEFING (NEGRITO VERMELHO):
+           - Se o nome de um voluntário estiver em NEGRITO VERMELHO, ele é o responsável pelo "Briefing" (compartilhar versículo/testemunho).
+        8. FUNÇÕES AUSENTES: Se houver nomes de voluntários em um bloco, mas a função correspondente não estiver clara ou estiver ausente, atribua a função como "Não definida".
         
-        Texto: "${pdfData.text.substring(0, 15000)}"
+        Sua tarefa é identificar TODOS os eventos (data e nome do evento) presentes no texto.
+        Para CADA evento, liste todos os voluntários e suas respectivas funções, usando as funções definidas na linha cinza claro. Se a função não estiver definida, use "Não definida".
+        
+        IMPORTANTE: Se houver mais de um evento no mesmo dia, certifique-se de listar TODOS eles separadamente.
+        
+        Texto: "${pdfData.text.substring(0, 20000)}"
         
         Retorne APENAS um JSON estruturado exatamente assim:
         [
           {
             "data": "YYYY-MM-DD",
+            "hora": "HH:mm",
             "evento": "Nome do Evento",
             "escalas": [
-              { "funcao": "Função (ex: Vocal, Violão, Som)", "voluntario": "Nome do Voluntário" }
-            ]
+              { 
+                "funcao": "Função (ex: Vocal, Violão, Som, ou 'Não definida')", 
+                "voluntarios": [
+                  { "nome": "Nome do Voluntário", "isLider": true/false, "isBriefing": true/false }
+                ] 
+              }
+            ],
+            "isEventoEspecial": true/false
           }
         ]
       `;
@@ -353,31 +382,54 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       console.log("PDF Parsing JSON:", jsonStr);
       const escalas = JSON.parse(jsonStr);
       
-      for (const item of escalas) {
-        // Check if event already exists
-        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.evento), where('dataHoraInicio', '==', `${item.data}T19:00:00Z`));
+        for (const item of escalas) {
+        // Parse date and time
+        const dateParts = item.data.split('-');
+        const year = new Date().getFullYear(); // Assuming current year
+        const dateObj = new Date(year, parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+        
+        // Combine date and time
+        const [hours, minutes] = item.hora.split(':');
+        dateObj.setHours(parseInt(hours), parseInt(minutes));
+        const isoDate = dateObj.toISOString();
+
+        // Check if event already exists by name AND date (ignoring time for now to find existing)
+        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.evento));
         const querySnapshot = await getDocs(q);
         
         let eventRef;
-        if (querySnapshot.empty) {
+        // Find if any event with this name exists on this date
+        const existingEvent = querySnapshot.docs.find(doc => {
+          const data = doc.data();
+          return data.dataHoraInicio.startsWith(item.data);
+        });
+
+        if (!existingEvent) {
           eventRef = await addDoc(collection(db, 'eventos'), {
             nomeEvento: item.evento,
-            dataHoraInicio: `${item.data}T19:00:00Z`
+            dataHoraInicio: isoDate,
+            isEventoEspecial: item.isEventoEspecial || false // Save special event status
           });
         } else {
-          eventRef = querySnapshot.docs[0].ref;
+          eventRef = existingEvent.ref;
         }
         
-        for (const esc of item.escalas) {
-          // Check if escala already exists for this event
-          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', esc.funcao), where('apelidoVoluntarioPDF', '==', esc.voluntario));
-          const escSnap = await getDocs(escQ);
-          if (escSnap.empty) {
-            await addDoc(collection(db, 'escalas'), {
-              eventoId: eventRef.id,
-              funcao: esc.funcao,
-              apelidoVoluntarioPDF: esc.voluntario
-            });
+        if (!item.isEventoEspecial && item.escalas) {
+          for (const esc of item.escalas) {
+            // Check if escala already exists for this event
+            for (const voluntario of esc.voluntarios) {
+              const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', esc.funcao), where('apelidoVoluntarioPDF', '==', voluntario.nome));
+              const escSnap = await getDocs(escQ);
+              if (escSnap.empty) {
+                await addDoc(collection(db, 'escalas'), {
+                  eventoId: eventRef.id,
+                  funcao: esc.funcao,
+                  apelidoVoluntarioPDF: voluntario.nome,
+                  isLider: voluntario.isLider,
+                  isBriefing: voluntario.isBriefing // Added briefing status
+                });
+              }
+            }
           }
         }
       }
@@ -493,7 +545,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           <div className="flex items-center justify-between overflow-x-auto pb-2">
             <TabsList className="bg-white border shadow-xs">
               <TabsTrigger value="dashboard" className="gap-2">
-                <User className="h-4 w-4" /> Dashboard
+                <User className="h-4 w-4" /> Tela inicial
               </TabsTrigger>
               <TabsTrigger value="calendar" className="gap-2">
                 <CalendarDays className="h-4 w-4" /> Calendário
@@ -744,7 +796,19 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-12"></TableHead>
+                        <TableHead className="w-12">
+                          <input 
+                            type="checkbox" 
+                            checked={eventos.length > 0 && selectedEventos.size === eventos.length}
+                            onChange={() => {
+                              if (selectedEventos.size === eventos.length) {
+                                setSelectedEventos(new Set());
+                              } else {
+                                setSelectedEventos(new Set(eventos.map(e => e.id)));
+                              }
+                            }}
+                          />
+                        </TableHead>
                         <TableHead>Evento</TableHead>
                         <TableHead>Data</TableHead>
                         <TableHead>Voluntários</TableHead>
