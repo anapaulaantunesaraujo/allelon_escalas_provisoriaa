@@ -209,36 +209,48 @@ function Dashboard() {
 
   const handleUpdateEvento = async () => {
     if (!editingEvento) return;
-    if (!editingEvento.id) {
-      console.error("Editing event has no ID:", editingEvento);
-      toast.error("Erro: Evento sem ID");
-      return;
-    }
-    console.log("Updating event:", editingEvento);
+    
+    console.log("Updating/Creating event:", editingEvento);
     try {
-      const eventRef = doc(db, 'eventos', editingEvento.id);
-      try {
-        await updateDoc(eventRef, {
+      let eventId = editingEvento.id;
+      if (!eventId) {
+        // Create new event
+        const newEventRef = await addDoc(collection(db, 'eventos'), {
           nomeEvento: editingEvento.nomeEvento,
-          dataHoraInicio: editingEvento.dataHoraInicio
+          dataHoraInicio: editingEvento.dataHoraInicio,
+          isEventoEspecial: false
         });
-      } catch (eventErr: any) {
-        const errorMessage = eventErr instanceof Error ? eventErr.message : String(eventErr);
-        if (eventErr.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
-          console.log(`Event ${editingEvento.id} not found, creating it instead.`);
-          await setDoc(eventRef, {
+        eventId = newEventRef.id;
+      } else {
+        // Update existing event
+        const eventRef = doc(db, 'eventos', eventId);
+        try {
+          await updateDoc(eventRef, {
             nomeEvento: editingEvento.nomeEvento,
-            dataHoraInicio: editingEvento.dataHoraInicio,
-            isEventoEspecial: false
+            dataHoraInicio: editingEvento.dataHoraInicio
           });
-        } else {
-          throw eventErr;
+        } catch (eventErr: any) {
+          const errorMessage = eventErr instanceof Error ? eventErr.message : String(eventErr);
+          if (eventErr.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
+            console.log(`Event ${eventId} not found, creating it instead.`);
+            await setDoc(eventRef, {
+              nomeEvento: editingEvento.nomeEvento,
+              dataHoraInicio: editingEvento.dataHoraInicio,
+              isEventoEspecial: false
+            });
+          } else {
+            throw eventErr;
+          }
         }
       }
-      // Get current escalas from DB to compare
-      const currentEscalasQ = query(collection(db, 'escalas'), where('eventoId', '==', editingEvento.id));
-      const currentEscalasSnap = await getDocs(currentEscalasQ);
-      const currentEscalasIds = currentEscalasSnap.docs.map(d => d.id);
+      
+      // Get current escalas from DB to compare (only if event existed)
+      let currentEscalasIds: string[] = [];
+      if (editingEvento.id) {
+        const currentEscalasQ = query(collection(db, 'escalas'), where('eventoId', '==', editingEvento.id));
+        const currentEscalasSnap = await getDocs(currentEscalasQ);
+        currentEscalasIds = currentEscalasSnap.docs.map(d => d.id);
+      }
       
       // Identify escalas to delete (those in DB but not in the edited event)
       const editedEscalasIds = editingEvento.escalas.map(e => e.id);
@@ -250,14 +262,18 @@ function Dashboard() {
       }
 
       for (const esc of editingEvento.escalas) {
-        if (!esc.id) {
-          console.error("Escala has no ID:", esc);
-          continue;
+        let escRef;
+        if (!esc.id || esc.id.startsWith('temp-')) {
+          // Create new escala
+          escRef = doc(collection(db, 'escalas'));
+        } else {
+          escRef = doc(db, 'escalas', esc.id);
         }
-        console.log("Updating escala:", esc);
-        const escRef = doc(db, 'escalas', esc.id);
+        
+        console.log("Updating/Creating escala:", esc);
         try {
           await updateDoc(escRef, {
+            eventoId: eventId,
             apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
             funcao: esc.funcao,
             isLider: esc.isLider,
@@ -268,7 +284,7 @@ function Dashboard() {
           if (escErr.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
             console.log(`Escala ${esc.id} not found, creating it instead.`);
             await setDoc(escRef, {
-              eventoId: editingEvento.id,
+              eventoId: eventId,
               apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
               funcao: esc.funcao,
               isLider: esc.isLider,
@@ -1031,6 +1047,14 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Gestão de Eventos</CardTitle>
                   <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditingEvento({
+                      id: '',
+                      nomeEvento: 'Novo Evento',
+                      dataHoraInicio: new Date().toISOString(),
+                      escalas: []
+                    })}>
+                      + Novo Evento
+                    </Button>
                     {selectedEventos.size > 0 && (
                       <>
                         <Button variant="outline" size="sm" onClick={() => setBulkEditOpen(true)}>
