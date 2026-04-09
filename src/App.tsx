@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { useAuth, AuthProvider } from './AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -109,6 +109,10 @@ function Dashboard() {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editingEvento, setEditingEvento] = useState<EventoWithEscalas | null>(null);
   const [selectedEventos, setSelectedEventos] = useState<Set<string>>(new Set());
+  const [nameFilter, setNameFilter] = useState('');
+  const [timeFilter, setTimeFilter] = useState('');
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkTime, setBulkTime] = useState('');
 
   const handleToggleEvento = (eventoId: string) => {
     const next = new Set(selectedEventos);
@@ -171,19 +175,25 @@ function Dashboard() {
 
   const handleUpdateEvento = async () => {
     if (!editingEvento) return;
+    console.log("Updating event:", editingEvento);
     try {
       await updateDoc(doc(db, 'eventos', editingEvento.id), {
         nomeEvento: editingEvento.nomeEvento,
         dataHoraInicio: editingEvento.dataHoraInicio
       });
       for (const esc of editingEvento.escalas) {
+        console.log("Updating escala:", esc);
         await updateDoc(doc(db, 'escalas', esc.id), {
-          apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF
+          apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
+          funcao: esc.funcao,
+          isLider: esc.isLider,
+          isBriefing: esc.isBriefing
         });
       }
       toast.success("Evento e escalas atualizados com sucesso!");
       setEditingEvento(null);
     } catch (err) {
+      console.error("Error updating event:", err);
       toast.error("Erro ao atualizar evento");
     }
   };
@@ -241,11 +251,38 @@ function Dashboard() {
     };
   }, []);
 
+  const filteredEventos = eventos.filter(ev => 
+    ev.nomeEvento.toLowerCase().includes(nameFilter.toLowerCase()) &&
+    format(new Date(ev.dataHoraInicio), 'HH:mm').includes(timeFilter)
+  );
+
   const myEscalas = eventos.flatMap(ev => 
     ev.escalas
       .filter(esc => esc.usuarioId === user?.uid)
       .map(esc => ({ ...esc, evento: ev }))
   ).filter(item => new Date(item.evento.dataHoraInicio) >= new Date());
+
+  const handleBulkEditTime = async () => {
+    if (!bulkTime) return;
+    try {
+      for (const eventoId of selectedEventos) {
+        const ev = eventos.find(e => e.id === eventoId);
+        if (ev) {
+          const date = new Date(ev.dataHoraInicio);
+          const [hours, minutes] = bulkTime.split(':');
+          date.setHours(parseInt(hours), parseInt(minutes));
+          await updateDoc(doc(db, 'eventos', eventoId), {
+            dataHoraInicio: date.toISOString()
+          });
+        }
+      }
+      toast.success("Horários atualizados com sucesso!");
+      setBulkEditOpen(false);
+      setSelectedEventos(new Set());
+    } catch (err) {
+      toast.error("Erro ao atualizar horários");
+    }
+  };
 
   const handleManualImport = async (csvContent: string) => {
     setIsImporting(true);
@@ -346,7 +383,11 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
            - Se o nome de um voluntário em QUALQUER OUTRA função estiver em NEGRITO PRETO, ele é o "MD" (coordenador da banda).
         6. BRIEFING (NEGRITO VERMELHO):
            - Se o nome de um voluntário estiver em NEGRITO VERMELHO, ele é o responsável pelo "Briefing" (compartilhar versículo/testemunho).
-        8. FUNÇÕES AUSENTES: Se houver nomes de voluntários em um bloco, mas a função correspondente não estiver clara ou estiver ausente, atribua a função como "Não definida".
+        7. FUNÇÕES AUSENTES: Se houver nomes de voluntários em um bloco, mas a função correspondente não estiver clara ou estiver ausente, atribua a função como "Não definida".
+        8. RIGOR NA EXTRAÇÃO:
+           - NÃO crie eventos que não estejam explicitamente listados no PDF.
+           - Se a data ou hora não for clara, NÃO crie o evento.
+           - Verifique cuidadosamente a associação entre voluntário e função. Se houver dúvida, não atribua um voluntário a uma função incorreta.
         
         Sua tarefa é identificar TODOS os eventos (data e nome do evento) presentes no texto.
         Para CADA evento, liste todos os voluntários e suas respectivas funções, usando as funções definidas na linha cinza claro. Se a função não estiver definida, use "Não definida".
@@ -513,13 +554,16 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                 />
                 <Input 
                   type="datetime-local"
-                  value={editingEvento.dataHoraInicio.slice(0, 16)} 
-                  onChange={e => setEditingEvento({...editingEvento, dataHoraInicio: e.target.value})}
+                  value={new Date(new Date(editingEvento.dataHoraInicio).getTime() - new Date(editingEvento.dataHoraInicio).getTimezoneOffset() * 60000).toISOString().slice(0, 16)} 
+                  onChange={e => {
+                    const localDate = new Date(e.target.value);
+                    setEditingEvento({...editingEvento, dataHoraInicio: localDate.toISOString()});
+                  }}
                 />
                 <div className="space-y-2">
                   <h4 className="font-semibold">Voluntários</h4>
                   {editingEvento.escalas.map((esc, index) => (
-                    <div key={esc.id} className="flex gap-2">
+                    <div key={esc.id} className="flex gap-2 items-center">
                       <Input value={esc.funcao} disabled className="w-1/3" />
                       <Input 
                         value={esc.apelidoVoluntarioPDF} 
@@ -529,6 +573,30 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                           setEditingEvento({...editingEvento, escalas: newEscalas});
                         }}
                       />
+                      <div className="flex items-center gap-2 text-xs">
+                        <label className="flex items-center gap-1">
+                          <input 
+                            type="checkbox" 
+                            checked={esc.isLider || false}
+                            onChange={e => {
+                              const newEscalas = [...editingEvento.escalas];
+                              newEscalas[index].isLider = e.target.checked;
+                              setEditingEvento({...editingEvento, escalas: newEscalas});
+                            }}
+                          /> Lider
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input 
+                            type="checkbox" 
+                            checked={esc.isBriefing || false}
+                            onChange={e => {
+                              const newEscalas = [...editingEvento.escalas];
+                              newEscalas[index].isBriefing = e.target.checked;
+                              setEditingEvento({...editingEvento, escalas: newEscalas});
+                            }}
+                          /> Briefing
+                        </label>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -537,6 +605,23 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditingEvento(null)}>Cancelar</Button>
               <Button onClick={handleUpdateEvento}>Salvar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={bulkEditOpen} onOpenChange={setBulkEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar Horário em Lote</DialogTitle>
+            </DialogHeader>
+            <Input 
+              type="time"
+              value={bulkTime}
+              onChange={e => setBulkTime(e.target.value)}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkEditOpen(false)}>Cancelar</Button>
+              <Button onClick={handleBulkEditTime}>Salvar</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -786,25 +871,44 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Gestão de Eventos</CardTitle>
-                  {selectedEventos.size > 0 && (
-                    <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
-                      Excluir {selectedEventos.size} selecionados
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {selectedEventos.size > 0 && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => setBulkEditOpen(true)}>
+                          Editar Horário em Lote
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
+                          Excluir {selectedEventos.size} selecionados
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
+                  <div className="flex gap-4 mb-4">
+                    <Input 
+                      placeholder="Filtrar por nome..." 
+                      value={nameFilter} 
+                      onChange={e => setNameFilter(e.target.value)} 
+                    />
+                    <Input 
+                      placeholder="Filtrar por horário (ex: 20:00)..." 
+                      value={timeFilter} 
+                      onChange={e => setTimeFilter(e.target.value)} 
+                    />
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-12">
                           <input 
                             type="checkbox" 
-                            checked={eventos.length > 0 && selectedEventos.size === eventos.length}
+                            checked={filteredEventos.length > 0 && selectedEventos.size === filteredEventos.length}
                             onChange={() => {
-                              if (selectedEventos.size === eventos.length) {
+                              if (selectedEventos.size === filteredEventos.length) {
                                 setSelectedEventos(new Set());
                               } else {
-                                setSelectedEventos(new Set(eventos.map(e => e.id)));
+                                setSelectedEventos(new Set(filteredEventos.map(e => e.id)));
                               }
                             }}
                           />
@@ -816,7 +920,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {eventos.map((ev) => (
+                      {filteredEventos.map((ev) => (
                         <TableRow key={ev.id}>
                           <TableCell>
                             <input 
