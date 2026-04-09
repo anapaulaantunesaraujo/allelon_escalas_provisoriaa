@@ -262,7 +262,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           <div className="flex items-center gap-4">
             <div className="hidden md:block text-right">
               <p className="text-sm font-medium">{user?.displayName || profile?.nomeCompleto}</p>
-              <p className="text-xs text-slate-500 capitalize">{profile?.nivelAcesso === 'admin' ? 'Administrador' : 'Usuário'}</p>
+              <p className="text-xs text-slate-500 capitalize">{isAdmin ? 'Administrador' : 'Usuário'}</p>
             </div>
             <Button variant="ghost" size="icon" onClick={() => signOut(auth)}>
               <LogOut className="h-5 w-5" />
