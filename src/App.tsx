@@ -439,7 +439,13 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        fullText += textContent.items.map((item: any) => item.str).join(" ");
+        
+        // Include positioning data (transform) to help the AI understand the layout
+        fullText += textContent.items.map((item: any) => {
+          const x = item.transform[4];
+          const y = item.transform[5];
+          return `[x:${x.toFixed(0)},y:${y.toFixed(0)}] ${item.str}`;
+        }).join(" ");
       }
       const pdfData = { text: fullText };
       
@@ -453,10 +459,11 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
         4. Associe os Nomes: O nome do voluntário geralmente aparece nas linhas imediatamente após a função. Atenção: Pode haver mais de uma pessoa para a mesma função (Ex: 'Vocal', e na sequência 'Isabely', 'Pedro' ). Se isso acontecer, crie uma linha separada para cada pessoa. Se não houver nome após a função, ignore-a.
         
         CRÍTICO - ALINHAMENTO DE LINHAS (Row-based parsing):
-        A extração está sofrendo de desalinhamento horizontal. Você DEVE aplicar um método de extração estrito 'linha por linha':
-        - A data que está na primeira coluna à esquerda deve ser vinculada ÚNICA e EXCLUSIVAMENTE às funções e nomes que compartilham a exata mesma faixa horizontal (coordenada Y).
-        - Se houver um espaço em branco entre a data e os voluntários, NÃO pule para a próxima linha; mantenha a leitura na mesma altura horizontal até o fim da página.
-        - Não misture voluntários de uma linha superior com a data da linha inferior.
+        O texto extraído agora contém coordenadas de posição no formato [x:...,y:...]. Use estas coordenadas para reconstruir a estrutura da tabela:
+        - A data que está na primeira coluna (menor valor de x) deve ser vinculada ÚNICA e EXCLUSIVAMENTE às funções e nomes que compartilham a exata mesma faixa horizontal (coordenada y).
+        - Se houver um espaço em branco entre a data e os voluntários, NÃO pule para a próxima linha; mantenha a leitura na mesma altura horizontal (valor de y similar) até o fim da página.
+        - Não misture voluntários de uma linha superior (valor de y maior) com a data da linha inferior (valor de y menor).
+        - Use o valor de 'y' para agrupar logicamente os itens na mesma linha.
         
         5. Formato de Saída (Obrigatório): Não me responda com texto comum. Retorne APENAS um formato de tabela CSV, usando ponto e vírgula (;) como separador, com o seguinte cabeçalho exato: Data;Horario;Nome_Evento;Funcao;Voluntario.
         
