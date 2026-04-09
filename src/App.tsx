@@ -108,18 +108,46 @@ function Dashboard() {
   const [isImporting, setIsImporting] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editingEvento, setEditingEvento] = useState<EventoWithEscalas | null>(null);
+  const [selectedEventos, setSelectedEventos] = useState<Set<string>>(new Set());
 
-  const handleUpdateEvento = async () => {
-    if (!editingEvento) return;
+  const handleToggleEvento = (eventoId: string) => {
+    const next = new Set(selectedEventos);
+    if (next.has(eventoId)) next.delete(eventoId);
+    else next.add(eventoId);
+    setSelectedEventos(next);
+  };
+
+  const handleDeleteSelected = async () => {
     try {
-      await updateDoc(doc(db, 'eventos', editingEvento.id), {
-        nomeEvento: editingEvento.nomeEvento,
-        dataHoraInicio: editingEvento.dataHoraInicio
-      });
-      toast.success("Evento atualizado com sucesso!");
-      setEditingEvento(null);
+      for (const eventoId of selectedEventos) {
+        await handleDeleteEvento(eventoId);
+      }
+      setSelectedEventos(new Set());
+      toast.success("Eventos selecionados excluídos com sucesso!");
     } catch (err) {
-      toast.error("Erro ao atualizar evento");
+      toast.error("Erro ao excluir eventos selecionados");
+    }
+  };
+
+  const linkVoluntarios = async () => {
+    try {
+      const escalasSnap = await getDocs(collection(db, 'escalas'));
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
+      
+      let updatedCount = 0;
+      for (const escDoc of escalasSnap.docs) {
+        const esc = escDoc.data() as EscalaAtribuicao;
+        const user = users.find(u => u.apelidoPDF === esc.apelidoVoluntarioPDF);
+        if (user && esc.usuarioId !== user.id) {
+          await updateDoc(escDoc.ref, { usuarioId: user.id });
+          updatedCount++;
+        }
+      }
+      toast.success(`${updatedCount} voluntários vinculados com sucesso!`);
+    } catch (err) {
+      console.error("Error linking volunteers:", err);
+      toast.error("Erro ao vincular voluntários");
     }
   };
 
@@ -137,11 +165,32 @@ function Dashboard() {
     }
   };
 
+  const handleUpdateEvento = async () => {
+    if (!editingEvento) return;
+    try {
+      await updateDoc(doc(db, 'eventos', editingEvento.id), {
+        nomeEvento: editingEvento.nomeEvento,
+        dataHoraInicio: editingEvento.dataHoraInicio
+      });
+      for (const esc of editingEvento.escalas) {
+        await updateDoc(doc(db, 'escalas', esc.id), {
+          apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF
+        });
+      }
+      toast.success("Evento e escalas atualizados com sucesso!");
+      setEditingEvento(null);
+    } catch (err) {
+      toast.error("Erro ao atualizar evento");
+    }
+  };
+
   const handleDeleteEvento = async (eventoId: string) => {
     try {
+      console.log(`Attempting to delete event: ${eventoId}`);
       // Delete all escalas for this event
       const escalasQ = query(collection(db, 'escalas'), where('eventoId', '==', eventoId));
       const escalasSnap = await getDocs(escalasQ);
+      console.log(`Found ${escalasSnap.size} escalas to delete.`);
       for (const escDoc of escalasSnap.docs) {
         await deleteDoc(escDoc.ref);
       }
@@ -149,7 +198,8 @@ function Dashboard() {
       await deleteDoc(doc(db, 'eventos', eventoId));
       toast.success("Evento e escalas excluídos com sucesso!");
     } catch (err) {
-      toast.error("Erro ao excluir evento");
+      console.error("Delete error:", err);
+      toast.error(`Erro ao excluir evento: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
     }
   };
 
@@ -165,11 +215,19 @@ function Dashboard() {
 
     const unsubEscalas = onSnapshot(collection(db, 'escalas'), (escalaSnap) => {
       const allEscalas = escalaSnap.docs.map(d => ({ id: d.id, ...d.data() } as EscalaAtribuicao));
+      console.log("All escalas loaded:", allEscalas);
       
-      setEventos(prevEventos => prevEventos.map(ev => ({
-        ...ev,
-        escalas: allEscalas.filter(esc => esc.eventoId === ev.id)
-      })));
+      setEventos(prevEventos => {
+        console.log("Updating eventos with escalas. Current eventos:", prevEventos);
+        return prevEventos.map(ev => {
+          const matchingEscalas = allEscalas.filter(esc => esc.eventoId === ev.id);
+          console.log(`Event ${ev.nomeEvento} (ID: ${ev.id}) matched with ${matchingEscalas.length} escalas.`);
+          return {
+            ...ev,
+            escalas: matchingEscalas
+          };
+        });
+      });
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'escalas'));
 
     return () => {
@@ -406,6 +464,22 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                   value={editingEvento.dataHoraInicio.slice(0, 16)} 
                   onChange={e => setEditingEvento({...editingEvento, dataHoraInicio: e.target.value})}
                 />
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Voluntários</h4>
+                  {editingEvento.escalas.map((esc, index) => (
+                    <div key={esc.id} className="flex gap-2">
+                      <Input value={esc.funcao} disabled className="w-1/3" />
+                      <Input 
+                        value={esc.apelidoVoluntarioPDF} 
+                        onChange={e => {
+                          const newEscalas = [...editingEvento.escalas];
+                          newEscalas[index].apelidoVoluntarioPDF = e.target.value;
+                          setEditingEvento({...editingEvento, escalas: newEscalas});
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             <DialogFooter>
@@ -580,6 +654,17 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" /> Gestão de Voluntários
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Button onClick={linkVoluntarios} className="w-full">Vincular Voluntários Automaticamente</Button>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
                       <CalendarDays className="h-5 w-5" /> Importar Escalas
                     </CardTitle>
                     <CardDescription>Upload do PDF com as escalas mensais</CardDescription>
@@ -647,13 +732,19 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
               </Card>
 
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Gestão de Eventos</CardTitle>
+                  {selectedEventos.size > 0 && (
+                    <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
+                      Excluir {selectedEventos.size} selecionados
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-12"></TableHead>
                         <TableHead>Evento</TableHead>
                         <TableHead>Data</TableHead>
                         <TableHead>Voluntários</TableHead>
@@ -663,6 +754,13 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                     <TableBody>
                       {eventos.map((ev) => (
                         <TableRow key={ev.id}>
+                          <TableCell>
+                            <input 
+                              type="checkbox" 
+                              checked={selectedEventos.has(ev.id)}
+                              onChange={() => handleToggleEvento(ev.id)}
+                            />
+                          </TableCell>
                           <TableCell className="font-medium">{ev.nomeEvento}</TableCell>
                           <TableCell>{format(new Date(ev.dataHoraInicio), 'dd/MM/yyyy HH:mm')}</TableCell>
                           <TableCell>
