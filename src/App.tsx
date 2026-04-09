@@ -143,7 +143,8 @@ function Dashboard() {
       for (const escDoc of escalasSnap.docs) {
         const esc = escDoc.data() as EscalaAtribuicao;
         const user = users.find(u => 
-          u.apelidoPDF.trim().toLowerCase() === esc.apelidoVoluntarioPDF.trim().toLowerCase()
+          u.apelidoPDF.trim().toLowerCase() === esc.apelidoVoluntarioPDF.trim().toLowerCase() ||
+          u.nomeCompleto.trim().toLowerCase().includes(esc.apelidoVoluntarioPDF.trim().toLowerCase())
         );
         if (user && esc.usuarioId !== user.id) {
           await updateDoc(escDoc.ref, { usuarioId: user.id });
