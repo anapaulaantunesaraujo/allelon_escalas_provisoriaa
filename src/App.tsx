@@ -623,10 +623,37 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                   }}
                 />
                 <div className="space-y-2">
-                  <h4 className="font-semibold">Voluntários</h4>
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-semibold">Voluntários</h4>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        const newEscala = {
+                          id: Math.random().toString(36).substring(7),
+                          funcao: 'Nova Função',
+                          apelidoVoluntarioPDF: '',
+                          isLider: false,
+                          isBriefing: false,
+                          usuarioId: ''
+                        };
+                        setEditingEvento({...editingEvento, escalas: [...editingEvento.escalas, newEscala]});
+                      }}
+                    >
+                      + Adicionar Voluntário
+                    </Button>
+                  </div>
                   {editingEvento.escalas.map((esc, index) => (
                     <div key={esc.id} className="flex gap-2 items-center">
-                      <Input value={esc.funcao} disabled className="w-1/3" />
+                      <Input 
+                        value={esc.funcao} 
+                        onChange={e => {
+                          const newEscalas = [...editingEvento.escalas];
+                          newEscalas[index].funcao = e.target.value;
+                          setEditingEvento({...editingEvento, escalas: newEscalas});
+                        }}
+                        className="w-1/3" 
+                      />
                       <Input 
                         value={esc.apelidoVoluntarioPDF} 
                         onChange={e => {
