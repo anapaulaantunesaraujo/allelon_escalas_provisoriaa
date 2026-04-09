@@ -117,13 +117,13 @@ service cloud.firestore {
 
     match /eventos/{eventoId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdmin() && isValidEvento(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidEvento(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /escalas/{escalaId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdmin() && isValidEscala(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidEscala(request.resource.data);
       allow delete: if isAdmin();
     }
   }
