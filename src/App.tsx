@@ -183,7 +183,8 @@ function Dashboard() {
       try {
         await updateDoc(userRef, {
           nomeCompleto: editingUser.nomeCompleto,
-          nivelAcesso: editingUser.nivelAcesso
+          nivelAcesso: editingUser.nivelAcesso,
+          apelidosPDF: editingUser.apelidosPDF || []
         });
       } catch (err: any) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -191,7 +192,8 @@ function Dashboard() {
           console.log(`User ${editingUser.id} not found, creating it instead.`);
           await setDoc(userRef, {
             nomeCompleto: editingUser.nomeCompleto,
-            nivelAcesso: editingUser.nivelAcesso
+            nivelAcesso: editingUser.nivelAcesso,
+            apelidosPDF: editingUser.apelidosPDF || []
           });
         } else {
           throw err;
@@ -590,6 +592,11 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                   value={editingUser.nomeCompleto} 
                   onChange={e => setEditingUser({...editingUser, nomeCompleto: e.target.value})}
                   placeholder="Nome Completo"
+                />
+                <Input 
+                  value={editingUser.apelidosPDF?.join(', ') || ''} 
+                  onChange={e => setEditingUser({...editingUser, apelidosPDF: e.target.value.split(',').map(s => s.trim())})}
+                  placeholder="Apelidos (separados por vírgula)"
                 />
                 <Select 
                   value={editingUser.nivelAcesso} 
