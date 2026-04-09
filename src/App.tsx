@@ -23,6 +23,33 @@ import { generateGoogleCalendarUrl, downloadICS } from './lib/calendar-utils';
 import { Toaster, toast } from 'sonner';
 
 function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const { signInWithEmail, resetPassword } = useAuth();
+
+  const handleEmailLogin = async () => {
+    try {
+      await signInWithEmail(email, password);
+    } catch (error) {
+      console.error("Email login failed", error);
+      toast.error("Falha ao entrar com e-mail.");
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email) {
+      toast.error("Por favor, insira seu e-mail.");
+      return;
+    }
+    try {
+      await resetPassword(email);
+      toast.success("E-mail de redefinição enviado!");
+    } catch (error) {
+      console.error("Reset password failed", error);
+      toast.error("Falha ao enviar e-mail de redefinição.");
+    }
+  };
+
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -44,11 +71,25 @@ function LoginScreen() {
             <CardTitle>Bem-vindo</CardTitle>
             <CardDescription>Acesse sua conta para visualizar suas escalas</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button onClick={handleLogin} className="w-full h-12 text-lg gap-2" size="lg">
+          <CardContent className="space-y-4">
+            <Button onClick={handleLogin} className="w-full h-12 text-lg gap-2" size="lg" variant="outline">
               <LogIn className="h-5 w-5" />
               Entrar com Google
             </Button>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-slate-500">Ou</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Input type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} />
+              <Input type="password" placeholder="Senha" value={password} onChange={e => setPassword(e.target.value)} />
+              <Button onClick={handleEmailLogin} className="w-full">Entrar com e-mail</Button>
+              <Button variant="link" onClick={handleResetPassword} className="w-full text-xs">Esqueci minha senha / Primeiro acesso</Button>
+            </div>
           </CardContent>
         </Card>
       </div>
