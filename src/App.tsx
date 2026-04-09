@@ -366,111 +366,66 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       const pdfData = { text: fullText };
       
       const prompt = `
-        Você é um especialista em extração de dados de escalas de voluntários.
-        O texto abaixo foi extraído de um PDF que contém tabelas de escalas.
-        
-        REGRAS DE INTERPRETAÇÃO:
-        1. NOME DO EVENTO: O nome do evento sempre aparece no topo de cada bloco, em uma barra colorida.
-        2. DATA E HORA: A data e o horário aparecem nos quadros pretos à esquerda de cada bloco.
-           - Formato de hora: Ex: "20h", "9h30".
-           - Exemplo de data/hora: "08 de Março Quarta-Feira 20h".
-        3. FUNÇÕES (CABEÇALHO): Logo abaixo do nome do evento, há uma linha cinza claro contendo os nomes das funções (ex: Vocal, Violão, Guitarra, etc.). Cada coluna nesta linha representa uma função.
-        4. VOLUNTÁRIOS: Logo abaixo de cada função, estão as células brancas com o(s) nome(s) do(s) voluntário(s).
-           - Uma função pode ter 1 ou mais voluntários (comum em "Vocal").
-           - Se houver mais de um voluntário na mesma função, liste todos eles.
-        5. LÍDERES (NEGRITO PRETO):
-           - Se o nome de um voluntário na função "Vocal" estiver em NEGRITO PRETO, ele é o "Worship leader".
-           - Se o nome de um voluntário em QUALQUER OUTRA função estiver em NEGRITO PRETO, ele é o "MD" (coordenador da banda).
-        6. BRIEFING (NEGRITO VERMELHO):
-           - Se o nome de um voluntário estiver em NEGRITO VERMELHO, ele é o responsável pelo "Briefing" (compartilhar versículo/testemunho).
-        7. FUNÇÕES AUSENTES: Se houver nomes de voluntários em um bloco, mas a função correspondente não estiver clara ou estiver ausente, atribua a função como "Não definida".
-        8. RIGOR NA EXTRAÇÃO:
-           - NÃO crie eventos que não estejam explicitamente listados no PDF.
-           - Se a data ou hora não for clara, NÃO crie o evento.
-           - Verifique cuidadosamente a associação entre voluntário e função. Se houver dúvida, não atribua um voluntário a uma função incorreta.
-        
-        Sua tarefa é identificar TODOS os eventos (data e nome do evento) presentes no texto.
-        Para CADA evento, liste todos os voluntários e suas respectivas funções, usando as funções definidas na linha cinza claro. Se a função não estiver definida, use "Não definida".
-        
-        IMPORTANTE: Se houver mais de um evento no mesmo dia, certifique-se de listar TODOS eles separadamente.
+        Você é um assistente especialista em extração de dados. Vou te enviar o conteúdo extraído de um PDF de escalas de voluntários de uma igreja. A formatação original foi perdida, então você precisa aplicar lógica para agrupar os dados.
+
+        Regras de Extração:
+        1. Identifique os blocos de eventos: Procure por datas seguidas de horários (Ex: '06 de Abril Segunda 20h' ou '12 de Abril Domingo 9h30' ).
+        2. Identifique o Evento: Logo após ou próximo à data, procure o nome do culto/evento (Ex: 'CULTO DA CIDADE' , 'TAMO JUNTO-2026' , 'ALMOÇO SOLIDÁRIO' ). Se não houver nome claro, chame de 'Culto Regular'.
+        3. Mapeie as Funções: Para cada bloco de data, procure as seguintes funções padrão: Vocal, Violão, Guitarra, Baixo, Bateria, Teclado, Som, Iluminação e Projeção.
+        4. Associe os Nomes: O nome do voluntário geralmente aparece nas linhas imediatamente após a função. Atenção: Pode haver mais de uma pessoa para a mesma função (Ex: 'Vocal', e na sequência 'Isabely', 'Pedro' ). Se isso acontecer, crie uma linha separada para cada pessoa. Se não houver nome após a função, ignore-a.
+        5. Formato de Saída (Obrigatório): Não me responda com texto comum. Retorne APENAS um formato de tabela CSV, usando ponto e vírgula (;) como separador, com o seguinte cabeçalho exato: Data;Horario;Nome_Evento;Funcao;Voluntario. Não use blocos de código markdown na resposta, apenas o texto bruto do CSV.
         
         Texto: "${pdfData.text.substring(0, 20000)}"
-        
-        Retorne APENAS um JSON estruturado exatamente assim:
-        [
-          {
-            "data": "YYYY-MM-DD",
-            "hora": "HH:mm",
-            "evento": "Nome do Evento",
-            "escalas": [
-              { 
-                "funcao": "Função (ex: Vocal, Violão, Som, ou 'Não definida')", 
-                "voluntarios": [
-                  { "nome": "Nome do Voluntário", "isLider": true/false, "isBriefing": true/false }
-                ] 
-              }
-            ],
-            "isEventoEspecial": true/false
-          }
-        ]
       `;
       
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-1.5-flash',
         contents: prompt,
       });
-      const jsonStr = (response.text || '').replace(/```json/g, '').replace(/```/g, '');
-      console.log("PDF Parsing JSON:", jsonStr);
-      const escalas = JSON.parse(jsonStr);
+      const csvStr = (response.text || '').replace(/```csv/g, '').replace(/```/g, '').trim();
+      console.log("PDF Parsing CSV:", csvStr);
       
-        for (const item of escalas) {
+      const Papa = await import('papaparse');
+      const results = Papa.parse(csvStr, { header: true, delimiter: ';' });
+      const escalas = results.data as any[];
+      
+      for (const item of escalas) {
+        if (!item.Data || !item.Nome_Evento) continue;
+
         // Parse date and time
-        const dateParts = item.data.split('-');
-        const year = new Date().getFullYear(); // Assuming current year
+        const dateParts = item.Data.split('-');
+        const year = new Date().getFullYear();
         const dateObj = new Date(year, parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
         
-        // Combine date and time
-        const [hours, minutes] = item.hora.split(':');
+        const [hours, minutes] = item.Horario.split(':');
         dateObj.setHours(parseInt(hours), parseInt(minutes));
         const isoDate = dateObj.toISOString();
 
-        // Check if event already exists by name AND date (ignoring time for now to find existing)
-        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.evento));
+        // Check if event already exists
+        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.Nome_Evento));
         const querySnapshot = await getDocs(q);
         
-        let eventRef;
-        // Find if any event with this name exists on this date
-        const existingEvent = querySnapshot.docs.find(doc => {
-          const data = doc.data();
-          return data.dataHoraInicio.startsWith(item.data);
-        });
+        let eventRef = querySnapshot.docs.find(doc => doc.data().dataHoraInicio.startsWith(item.Data))?.ref;
 
-        if (!existingEvent) {
+        if (!eventRef) {
           eventRef = await addDoc(collection(db, 'eventos'), {
-            nomeEvento: item.evento,
+            nomeEvento: item.Nome_Evento,
             dataHoraInicio: isoDate,
-            isEventoEspecial: item.isEventoEspecial || false // Save special event status
+            isEventoEspecial: false
           });
-        } else {
-          eventRef = existingEvent.ref;
         }
         
-        if (!item.isEventoEspecial && item.escalas) {
-          for (const esc of item.escalas) {
-            // Check if escala already exists for this event
-            for (const voluntario of esc.voluntarios) {
-              const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', esc.funcao), where('apelidoVoluntarioPDF', '==', voluntario.nome));
-              const escSnap = await getDocs(escQ);
-              if (escSnap.empty) {
-                await addDoc(collection(db, 'escalas'), {
-                  eventoId: eventRef.id,
-                  funcao: esc.funcao,
-                  apelidoVoluntarioPDF: voluntario.nome,
-                  isLider: voluntario.isLider,
-                  isBriefing: voluntario.isBriefing // Added briefing status
-                });
-              }
-            }
+        if (item.Voluntario && item.Funcao) {
+          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', item.Funcao), where('apelidoVoluntarioPDF', '==', item.Voluntario));
+          const escSnap = await getDocs(escQ);
+          if (escSnap.empty) {
+            await addDoc(collection(db, 'escalas'), {
+              eventoId: eventRef.id,
+              funcao: item.Funcao,
+              apelidoVoluntarioPDF: item.Voluntario,
+              isLider: false,
+              isBriefing: false
+            });
           }
         }
       }
@@ -554,10 +509,16 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                 />
                 <Input 
                   type="datetime-local"
-                  value={new Date(new Date(editingEvento.dataHoraInicio).getTime() - new Date(editingEvento.dataHoraInicio).getTimezoneOffset() * 60000).toISOString().slice(0, 16)} 
+                  value={
+                    !isNaN(new Date(editingEvento.dataHoraInicio).getTime()) 
+                      ? new Date(new Date(editingEvento.dataHoraInicio).getTime() - new Date(editingEvento.dataHoraInicio).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                      : ''
+                  }
                   onChange={e => {
                     const localDate = new Date(e.target.value);
-                    setEditingEvento({...editingEvento, dataHoraInicio: localDate.toISOString()});
+                    if (!isNaN(localDate.getTime())) {
+                      setEditingEvento({...editingEvento, dataHoraInicio: localDate.toISOString()});
+                    }
                   }}
                 />
                 <div className="space-y-2">
