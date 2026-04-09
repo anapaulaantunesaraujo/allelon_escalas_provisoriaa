@@ -142,15 +142,31 @@ function Dashboard() {
       let updatedCount = 0;
       for (const escDoc of escalasSnap.docs) {
         const esc = escDoc.data() as EscalaAtribuicao;
-        const user = users.find(u => 
-          u.apelidoPDF.trim().toLowerCase() === esc.apelidoVoluntarioPDF.trim().toLowerCase() ||
-          u.nomeCompleto.trim().toLowerCase().includes(esc.apelidoVoluntarioPDF.trim().toLowerCase())
-        );
-        if (user && esc.usuarioId !== user.id) {
+        const escName = esc.apelidoVoluntarioPDF.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        
+        const user = users.find(u => {
+          const userName = u.nomeCompleto.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
+          const cleanEscName = escName.replace(/\s+/g, '');
+          
+          // Check if any of the nicknames match
+          const nickMatches = u.apelidosPDF?.some(nick => 
+            nick.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '') === cleanEscName
+          );
+
+          const isMatch = nickMatches || userName.includes(cleanEscName) || cleanEscName.includes(userName);
+          
+          if (isMatch) {
+              console.log(`DEBUG MATCH: Escala '${escName}' | User '${u.nomeCompleto}' | Match: ${isMatch}`);
+          }
+          return isMatch;
+        });
+
+        if (user) {
+          console.log(`LINKING: Escala ${esc.id} (${esc.apelidoVoluntarioPDF}) to User ${user.id} (${user.nomeCompleto})`);
           await updateDoc(escDoc.ref, { usuarioId: user.id });
           updatedCount++;
-        } else if (!user) {
-          console.log(`No user found for: ${esc.apelidoVoluntarioPDF}`);
+        } else {
+          console.log(`No user found for: ${esc.apelidoVoluntarioPDF} (Normalized: ${escName})`);
         }
       }
       toast.success(`${updatedCount} voluntários vinculados com sucesso!`);
@@ -323,11 +339,14 @@ function Dashboard() {
     format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'HH:mm').includes(timeFilter)
   );
 
-  const myEscalas = eventos.flatMap(ev => 
-    ev.escalas
-      .filter(esc => esc.usuarioId === user?.uid)
-      .map(esc => ({ ...esc, evento: ev }))
-  ).filter(item => new Date(item.evento.dataHoraInicio || new Date().toISOString()) >= new Date());
+  const myEscalas = eventos.flatMap(ev => {
+    const matching = ev.escalas.filter(esc => {
+      const isMatch = esc.usuarioId === user?.uid;
+      console.log(`DEBUG: Event ${ev.nomeEvento} (ID: ${ev.id}) | Escala ID: ${esc.id} | Escala usuarioId: '${esc.usuarioId}' | User UID: '${user?.uid}' | Match: ${isMatch}`);
+      return isMatch;
+    });
+    return matching.map(esc => ({ ...esc, evento: ev }));
+  }).filter(item => new Date(item.evento.dataHoraInicio || new Date().toISOString()) >= new Date());
 
   const handleBulkEditTime = async () => {
     if (!bulkTime) return;

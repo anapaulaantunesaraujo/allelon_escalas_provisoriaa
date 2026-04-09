@@ -3,7 +3,7 @@ export type UserRole = 'admin' | 'user';
 export interface UserProfile {
   id: string;
   nomeCompleto: string;
-  apelidoPDF: string; // Key for matching CSV data
+  apelidosPDF: string[]; // Changed from apelidoPDF: string to support multiple nicknames
   email: string;
   funcoesAptas: string[];
   nivelAcesso: UserRole;
