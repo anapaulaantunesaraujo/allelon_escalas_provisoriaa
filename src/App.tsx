@@ -162,8 +162,8 @@ function Dashboard() {
         });
 
         if (user) {
-          console.log(`LINKING: Escala ${esc.id} (${esc.apelidoVoluntarioPDF}) to User ${user.id} (${user.nomeCompleto})`);
-          await updateDoc(escDoc.ref, { usuarioId: user.id });
+          console.log(`LINKING: Escala ${esc.id} (${esc.apelidoVoluntarioPDF}) to User ${user.id} (${user.nomeCompleto}) - Email: ${user.email}`);
+          await updateDoc(escDoc.ref, { usuarioId: user.email });
           updatedCount++;
         } else {
           console.log(`No user found for: ${esc.apelidoVoluntarioPDF} (Normalized: ${escName})`);
@@ -343,9 +343,8 @@ function Dashboard() {
 
   const myEscalas = eventos.flatMap(ev => {
     const matching = ev.escalas.filter(esc => {
-      const isMatch = esc.usuarioId === user?.uid;
-      console.log(`DEBUG: Event ${ev.nomeEvento} (ID: ${ev.id}) | Escala ID: ${esc.id} | Escala usuarioId: '${esc.usuarioId}' | User UID: '${user?.uid}' | Match: ${isMatch}`);
-      return isMatch;
+      // Compare scale's usuarioId (which we'll ensure is an email) with user's email
+      return esc.usuarioId === user?.email;
     });
     return matching.map(esc => ({ ...esc, evento: ev }));
   }).filter(item => new Date(item.evento.dataHoraInicio || new Date().toISOString()) >= new Date());
