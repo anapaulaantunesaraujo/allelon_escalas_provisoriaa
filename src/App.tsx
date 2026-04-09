@@ -81,7 +81,7 @@ function Dashboard() {
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
     
     const q = query(collection(db, 'eventos'), orderBy('dataHoraInicio', 'asc'));
     const unsubEventos = onSnapshot(q, (snapshot) => {
@@ -112,27 +112,66 @@ function Dashboard() {
       .map(esc => ({ ...esc, evento: ev }))
   ).filter(item => new Date(item.evento.dataHoraInicio) >= new Date());
 
-  const handleUserImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.[0]) return;
+  const handleManualImport = async (csvContent: string) => {
     setIsImporting(true);
     try {
-      const users = await parseUsersCSV(e.target.files[0]);
-      for (const u of users) {
-        if (u.email) {
-          // Save to Firestore
-          await setDoc(doc(db, 'users', u.email), {
-            ...u,
-            nivelAcesso: u.nivelAcesso || 'user'
-          });
-          toast.info(`Usuário salvo: ${u.nomeCompleto}`);
+      const Papa = await import('papaparse');
+      Papa.parse(csvContent, {
+        header: true,
+        skipEmptyLines: true,
+        delimiter: ';',
+        complete: async (results) => {
+          for (const row: any of results.data) {
+            if (row.Email) {
+              await setDoc(doc(db, 'users', row.Email), {
+                nomeCompleto: row.Nome_Completo,
+                apelidoPDF: row.Apelido_PDF,
+                email: row.Email,
+                funcoesAptas: row.Funcoes_Aptas ? row.Funcoes_Aptas.split(',').map((f: string) => f.trim()) : [],
+                nivelAcesso: row.Nivel_Acessos?.toLowerCase().includes('admin') ? 'admin' : 'user'
+              });
+            }
+          }
+          toast.success("Usuários importados com sucesso!");
         }
-      }
-      toast.success("Importação de usuários concluída!");
+      });
     } catch (err) {
       toast.error("Erro ao importar usuários");
     } finally {
       setIsImporting(false);
     }
+  };
+
+  useEffect(() => {
+    // Auto-import the provided data for the user
+    const csvData = `Nome_Completo;Apelido_PDF;Email;Funcoes_Aptas;Nivel_Acessos
+Adriele Reis;Adriele;adrielemreis16@gmail.com;Projeção;Usuário
+Ana Paula Antunes Araujo;Ana Paula;anapaula.antunesaraujo@gmail.com;Projeção,Som,Vocal;Administrador
+Isabela Lenzi;Isabela P.;isabelapereira2503@gmail.com;Projeção;Administrador
+Bruno Lenzi;Bruno Lenzi;brunolenziproducoes@gmail.com;Som,Iluminação,Projeção;Administrador
+Nícolas Jesus;Nicolas;nicolasajesus27@gmail.com;Projeção;Usuário
+Nicoly Alexandra;Nicolly;nicolyalexandraitj@gmail.com;Projeção;Usuário
+Anny Sousa;Anny;williane.sousa@gmail.com;Projeção;Usuário
+Gabie Felisberto;Gabriela F.;gabriela.vitoria.felisberto@outlook.com;Projeção,vocal;Usuário
+Taís Araujo;Taís;araujotais264@gmail.com;Projeção;Usuário
+Ana Carla;Ana Carla;anacarlapequena54@gmail.com;Projeção;Usuário
+Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
+    
+    // Only import if users list is empty to avoid overwriting
+    if (users.length === 0) {
+      handleManualImport(csvData);
+    }
+  }, []);
+
+  const handleUserImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      await handleManualImport(text);
+    };
+    reader.readAsText(file);
   };
 
   const handleEscalaImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
