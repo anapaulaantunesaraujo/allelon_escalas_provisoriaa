@@ -162,27 +162,65 @@ function Dashboard() {
   const handleUpdateUser = async () => {
     if (!editingUser) return;
     try {
-      await updateDoc(doc(db, 'users', editingUser.id), {
-        nomeCompleto: editingUser.nomeCompleto,
-        nivelAcesso: editingUser.nivelAcesso
-      });
+      const userRef = doc(db, 'users', editingUser.id);
+      try {
+        await updateDoc(userRef, {
+          nomeCompleto: editingUser.nomeCompleto,
+          nivelAcesso: editingUser.nivelAcesso
+        });
+      } catch (err: any) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (err.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
+          console.log(`User ${editingUser.id} not found, creating it instead.`);
+          await setDoc(userRef, {
+            nomeCompleto: editingUser.nomeCompleto,
+            nivelAcesso: editingUser.nivelAcesso
+          });
+        } else {
+          throw err;
+        }
+      }
       toast.success("Usuário atualizado com sucesso!");
       setEditingUser(null);
     } catch (err) {
+      console.error("Error updating user:", err);
       toast.error("Erro ao atualizar usuário");
     }
   };
 
   const handleUpdateEvento = async () => {
     if (!editingEvento) return;
+    if (!editingEvento.id) {
+      console.error("Editing event has no ID:", editingEvento);
+      toast.error("Erro: Evento sem ID");
+      return;
+    }
     console.log("Updating event:", editingEvento);
     try {
       const eventRef = doc(db, 'eventos', editingEvento.id);
-      await updateDoc(eventRef, {
-        nomeEvento: editingEvento.nomeEvento,
-        dataHoraInicio: editingEvento.dataHoraInicio
-      });
+      try {
+        await updateDoc(eventRef, {
+          nomeEvento: editingEvento.nomeEvento,
+          dataHoraInicio: editingEvento.dataHoraInicio
+        });
+      } catch (eventErr: any) {
+        const errorMessage = eventErr instanceof Error ? eventErr.message : String(eventErr);
+        if (eventErr.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
+          console.log(`Event ${editingEvento.id} not found, creating it instead.`);
+          await setDoc(eventRef, {
+            nomeEvento: editingEvento.nomeEvento,
+            dataHoraInicio: editingEvento.dataHoraInicio,
+            isEventoEspecial: false
+          });
+        } else {
+          throw eventErr;
+        }
+      }
       for (const esc of editingEvento.escalas) {
+        if (!esc.id) {
+          console.error("Escala has no ID:", esc);
+          continue;
+        }
         console.log("Updating escala:", esc);
         const escRef = doc(db, 'escalas', esc.id);
         try {
@@ -193,7 +231,8 @@ function Dashboard() {
             isBriefing: esc.isBriefing
           });
         } catch (escErr: any) {
-          if (escErr.code === 'not-found') {
+          const errorMessage = escErr instanceof Error ? escErr.message : String(escErr);
+          if (escErr.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
             console.log(`Escala ${esc.id} not found, creating it instead.`);
             await setDoc(escRef, {
               eventoId: editingEvento.id,
@@ -226,7 +265,17 @@ function Dashboard() {
         await deleteDoc(escDoc.ref);
       }
       // Delete event
-      await deleteDoc(doc(db, 'eventos', eventoId));
+      const eventRef = doc(db, 'eventos', eventoId);
+      try {
+        await deleteDoc(eventRef);
+      } catch (err: any) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (err.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
+          console.log(`Event ${eventoId} not found, skipping delete.`);
+        } else {
+          throw err;
+        }
+      }
       toast.success("Evento e escalas excluídos com sucesso!");
     } catch (err) {
       console.error("Delete error:", err);
@@ -270,14 +319,14 @@ function Dashboard() {
 
   const filteredEventos = eventos.filter(ev => 
     ev.nomeEvento.toLowerCase().includes(nameFilter.toLowerCase()) &&
-    format(new Date(ev.dataHoraInicio), 'HH:mm').includes(timeFilter)
+    format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'HH:mm').includes(timeFilter)
   );
 
   const myEscalas = eventos.flatMap(ev => 
     ev.escalas
       .filter(esc => esc.usuarioId === user?.uid)
       .map(esc => ({ ...esc, evento: ev }))
-  ).filter(item => new Date(item.evento.dataHoraInicio) >= new Date());
+  ).filter(item => new Date(item.evento.dataHoraInicio || new Date().toISOString()) >= new Date());
 
   const handleBulkEditTime = async () => {
     if (!bulkTime) return;
@@ -285,18 +334,30 @@ function Dashboard() {
       for (const eventoId of selectedEventos) {
         const ev = eventos.find(e => e.id === eventoId);
         if (ev) {
-          const date = new Date(ev.dataHoraInicio);
+          const date = new Date(ev.dataHoraInicio || new Date().toISOString());
           const [hours, minutes] = bulkTime.split(':');
           date.setHours(parseInt(hours), parseInt(minutes));
-          await updateDoc(doc(db, 'eventos', eventoId), {
-            dataHoraInicio: date.toISOString()
-          });
+          
+          const eventRef = doc(db, 'eventos', eventoId);
+          try {
+            await updateDoc(eventRef, {
+              dataHoraInicio: date.toISOString()
+            });
+          } catch (err: any) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            if (err.code === 'not-found' || errorMessage.includes('not found') || errorMessage.includes('404')) {
+              console.log(`Event ${eventoId} not found, skipping.`);
+            } else {
+              throw err;
+            }
+          }
         }
       }
       toast.success("Horários atualizados com sucesso!");
       setBulkEditOpen(false);
       setSelectedEventos(new Set());
     } catch (err) {
+      console.error("Error updating bulk times:", err);
       toast.error("Erro ao atualizar horários");
     }
   };
@@ -390,13 +451,26 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
         2. Identifique o Evento: Logo após ou próximo à data, procure o nome do culto/evento (Ex: 'CULTO DA CIDADE' , 'TAMO JUNTO-2026' , 'ALMOÇO SOLIDÁRIO' ). Se não houver nome claro, chame de 'Culto Regular'.
         3. Mapeie as Funções: Para cada bloco de data, procure as seguintes funções padrão: Vocal, Violão, Guitarra, Baixo, Bateria, Teclado, Som, Iluminação e Projeção.
         4. Associe os Nomes: O nome do voluntário geralmente aparece nas linhas imediatamente após a função. Atenção: Pode haver mais de uma pessoa para a mesma função (Ex: 'Vocal', e na sequência 'Isabely', 'Pedro' ). Se isso acontecer, crie uma linha separada para cada pessoa. Se não houver nome após a função, ignore-a.
-        5. Formato de Saída (Obrigatório): Não me responda com texto comum. Retorne APENAS um formato de tabela CSV, usando ponto e vírgula (;) como separador, com o seguinte cabeçalho exato: Data;Horario;Nome_Evento;Funcao;Voluntario. Não use blocos de código markdown na resposta, apenas o texto bruto do CSV.
+        
+        CRÍTICO - ALINHAMENTO DE LINHAS (Row-based parsing):
+        A extração está sofrendo de desalinhamento horizontal. Você DEVE aplicar um método de extração estrito 'linha por linha':
+        - A data que está na primeira coluna à esquerda deve ser vinculada ÚNICA e EXCLUSIVAMENTE às funções e nomes que compartilham a exata mesma faixa horizontal (coordenada Y).
+        - Se houver um espaço em branco entre a data e os voluntários, NÃO pule para a próxima linha; mantenha a leitura na mesma altura horizontal até o fim da página.
+        - Não misture voluntários de uma linha superior com a data da linha inferior.
+        
+        5. Formato de Saída (Obrigatório): Não me responda com texto comum. Retorne APENAS um formato de tabela CSV, usando ponto e vírgula (;) como separador, com o seguinte cabeçalho exato: Data;Horario;Nome_Evento;Funcao;Voluntario.
+        
+        Regras de Formatação de Dados:
+        - Data: Deve estar no formato YYYY-MM-DD (ex: 2026-04-06).
+        - Horario: Deve estar no formato HH:mm (ex: 20:00, 09:30).
+        
+        Não use blocos de código markdown na resposta, apenas o texto bruto do CSV.
         
         Texto: "${pdfData.text.substring(0, 20000)}"
       `;
       
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: prompt,
       });
       const csvStr = (response.text || '').replace(/```csv/g, '').replace(/```/g, '').trim();
@@ -410,12 +484,11 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
         if (!item.Data || !item.Nome_Evento) continue;
 
         // Parse date and time
-        const dateParts = item.Data.split('-');
-        const year = new Date().getFullYear();
-        const dateObj = new Date(year, parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+        const [year, month, day] = item.Data.split('-').map(Number);
+        const dateObj = new Date(year, month - 1, day);
         
-        const [hours, minutes] = item.Horario.split(':');
-        dateObj.setHours(parseInt(hours), parseInt(minutes));
+        const [hours, minutes] = item.Horario.split(':').map(Number);
+        dateObj.setHours(hours, minutes);
         const isoDate = dateObj.toISOString();
 
         // Check if event already exists
@@ -527,14 +600,18 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                 <Input 
                   type="datetime-local"
                   value={
-                    !isNaN(new Date(editingEvento.dataHoraInicio).getTime()) 
+                    editingEvento.dataHoraInicio && !isNaN(new Date(editingEvento.dataHoraInicio).getTime()) 
                       ? new Date(new Date(editingEvento.dataHoraInicio).getTime() - new Date(editingEvento.dataHoraInicio).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
                       : ''
                   }
                   onChange={e => {
-                    const localDate = new Date(e.target.value);
-                    if (!isNaN(localDate.getTime())) {
-                      setEditingEvento({...editingEvento, dataHoraInicio: localDate.toISOString()});
+                    if (e.target.value) {
+                      const localDate = new Date(e.target.value);
+                      if (!isNaN(localDate.getTime())) {
+                        setEditingEvento({...editingEvento, dataHoraInicio: localDate.toISOString()});
+                      }
+                    } else {
+                      setEditingEvento({...editingEvento, dataHoraInicio: ''});
                     }
                   }}
                 />
@@ -649,7 +726,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                         <div className="flex items-center gap-2 text-slate-600">
                           <CalendarIcon className="h-4 w-4" />
                           <span className="text-sm">
-                            {format(new Date(item.evento.dataHoraInicio), "PPPP 'às' HH:mm", { locale: ptBR })}
+                            {format(new Date(item.evento.dataHoraInicio || new Date().toISOString()), "PPPP 'às' HH:mm", { locale: ptBR })}
                           </span>
                         </div>
                       </CardContent>
@@ -695,12 +772,12 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                   {selectedDate && (
                     <div className="space-y-6">
                       {eventos
-                        .filter(ev => isSameDay(new Date(ev.dataHoraInicio), selectedDate))
+                        .filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate))
                         .map(ev => (
                           <div key={ev.id} className="space-y-4">
                             <div className="flex items-center justify-between border-b pb-2">
                               <h3 className="font-bold text-lg text-primary">{ev.nomeEvento}</h3>
-                              <span className="text-sm text-slate-500">{format(new Date(ev.dataHoraInicio), 'HH:mm')}</span>
+                              <span className="text-sm text-slate-500">{format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'HH:mm')}</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               {ev.escalas.length > 0 ? (
@@ -728,7 +805,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                             </div>
                           </div>
                         ))}
-                      {eventos.filter(ev => isSameDay(new Date(ev.dataHoraInicio), selectedDate)).length === 0 && (
+                      {eventos.filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate)).length === 0 && (
                         <p className="text-center py-8 text-slate-400">Nenhum evento programado para este dia.</p>
                       )}
                     </div>
@@ -908,7 +985,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                             />
                           </TableCell>
                           <TableCell className="font-medium">{ev.nomeEvento}</TableCell>
-                          <TableCell>{format(new Date(ev.dataHoraInicio), 'dd/MM/yyyy HH:mm')}</TableCell>
+                          <TableCell>{format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'dd/MM/yyyy HH:mm')}</TableCell>
                           <TableCell>
                             <div className="flex -space-x-2">
                               {ev.escalas.slice(0, 3).map((esc, i) => (
