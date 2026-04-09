@@ -76,18 +76,21 @@ service cloud.firestore {
              data.nivelAcesso in ['admin', 'user'];
     }
 
-    function isValidEvento(data) {
-      return data.keys().hasAll(['nomeEvento', 'dataHoraInicio']) &&
-             data.nomeEvento is string && data.nomeEvento.size() > 0 && data.nomeEvento.size() < 200 &&
-             isValidDateString(data.dataHoraInicio);
+    function isValidEvento(data, isCreate) {
+      return (isCreate ? (data.nomeEvento is string && data.dataHoraInicio is string) : true) &&
+             (!('nomeEvento' in data) || (data.nomeEvento is string && data.nomeEvento.size() > 0 && data.nomeEvento.size() < 200)) &&
+             (!('dataHoraInicio' in data) || isValidDateString(data.dataHoraInicio)) &&
+             (!('isEventoEspecial' in data) || data.isEventoEspecial is bool);
     }
 
-    function isValidEscala(data) {
-      return data.keys().hasAll(['eventoId', 'funcao', 'apelidoVoluntarioPDF']) &&
-             data.eventoId is string &&
-             data.funcao is string && data.funcao.size() > 0 && data.funcao.size() < 100 &&
-             data.apelidoVoluntarioPDF is string && data.apelidoVoluntarioPDF.size() > 0 && data.apelidoVoluntarioPDF.size() < 50 &&
-             (!('usuarioId' in data) || data.usuarioId is string);
+    function isValidEscala(data, isCreate) {
+      return (isCreate ? (data.eventoId is string && data.funcao is string && data.apelidoVoluntarioPDF is string) : true) &&
+             (!('eventoId' in data) || data.eventoId is string) &&
+             (!('funcao' in data) || (data.funcao is string && data.funcao.size() > 0 && data.funcao.size() < 100)) &&
+             (!('apelidoVoluntarioPDF' in data) || (data.apelidoVoluntarioPDF is string && data.apelidoVoluntarioPDF.size() > 0 && data.apelidoVoluntarioPDF.size() < 50)) &&
+             (!('usuarioId' in data) || data.usuarioId is string) &&
+             (!('isLider' in data) || data.isLider is bool) &&
+             (!('isBriefing' in data) || data.isBriefing is bool);
     }
 
     // ===============================================================
@@ -117,13 +120,15 @@ service cloud.firestore {
 
     match /eventos/{eventoId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidEvento(request.resource.data);
+      allow create: if isAuthenticated() && isValidEvento(request.resource.data, true);
+      allow update: if isAuthenticated() && isValidEvento(request.resource.data, false);
       allow delete: if isAdmin();
     }
 
     match /escalas/{escalaId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidEscala(request.resource.data);
+      allow create: if isAuthenticated() && isValidEscala(request.resource.data, true);
+      allow update: if isAuthenticated() && isValidEscala(request.resource.data, false);
       allow delete: if isAdmin();
     }
   }
