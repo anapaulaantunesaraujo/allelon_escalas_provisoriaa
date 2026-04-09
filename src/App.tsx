@@ -177,18 +177,35 @@ function Dashboard() {
     if (!editingEvento) return;
     console.log("Updating event:", editingEvento);
     try {
-      await updateDoc(doc(db, 'eventos', editingEvento.id), {
+      const eventRef = doc(db, 'eventos', editingEvento.id);
+      await updateDoc(eventRef, {
         nomeEvento: editingEvento.nomeEvento,
         dataHoraInicio: editingEvento.dataHoraInicio
       });
       for (const esc of editingEvento.escalas) {
         console.log("Updating escala:", esc);
-        await updateDoc(doc(db, 'escalas', esc.id), {
-          apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
-          funcao: esc.funcao,
-          isLider: esc.isLider,
-          isBriefing: esc.isBriefing
-        });
+        const escRef = doc(db, 'escalas', esc.id);
+        try {
+          await updateDoc(escRef, {
+            apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
+            funcao: esc.funcao,
+            isLider: esc.isLider,
+            isBriefing: esc.isBriefing
+          });
+        } catch (escErr: any) {
+          if (escErr.code === 'not-found') {
+            console.log(`Escala ${esc.id} not found, creating it instead.`);
+            await setDoc(escRef, {
+              eventoId: editingEvento.id,
+              apelidoVoluntarioPDF: esc.apelidoVoluntarioPDF,
+              funcao: esc.funcao,
+              isLider: esc.isLider,
+              isBriefing: esc.isBriefing
+            });
+          } else {
+            throw escErr;
+          }
+        }
       }
       toast.success("Evento e escalas atualizados com sucesso!");
       setEditingEvento(null);
