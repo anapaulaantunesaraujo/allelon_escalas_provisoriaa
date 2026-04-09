@@ -691,6 +691,17 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                           setEditingEvento({...editingEvento, escalas: newEscalas});
                         }}
                       />
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-red-500 hover:text-red-700"
+                        onClick={() => {
+                          const newEscalas = editingEvento.escalas.filter(e => e.id !== esc.id);
+                          setEditingEvento({...editingEvento, escalas: newEscalas});
+                        }}
+                      >
+                        <AlertTriangle className="h-4 w-4" />
+                      </Button>
                       <div className="flex items-center gap-2 text-xs">
                         <label className="flex items-center gap-1">
                           <input 
@@ -778,10 +789,8 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => downloadICS(item.evento)}>
                               <Download className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                              <a href={generateGoogleCalendarUrl(item.evento)} target="_blank" rel="noreferrer">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.open(generateGoogleCalendarUrl(item.evento), '_blank')}>
                                 <CalendarIcon className="h-4 w-4" />
-                              </a>
                             </Button>
                           </div>
                         </div>
