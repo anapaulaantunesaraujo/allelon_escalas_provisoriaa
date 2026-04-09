@@ -235,6 +235,20 @@ function Dashboard() {
           throw eventErr;
         }
       }
+      // Get current escalas from DB to compare
+      const currentEscalasQ = query(collection(db, 'escalas'), where('eventoId', '==', editingEvento.id));
+      const currentEscalasSnap = await getDocs(currentEscalasQ);
+      const currentEscalasIds = currentEscalasSnap.docs.map(d => d.id);
+      
+      // Identify escalas to delete (those in DB but not in the edited event)
+      const editedEscalasIds = editingEvento.escalas.map(e => e.id);
+      const escalasToDelete = currentEscalasIds.filter(id => !editedEscalasIds.includes(id));
+      
+      for (const id of escalasToDelete) {
+        console.log("Deleting escala:", id);
+        await deleteDoc(doc(db, 'escalas', id));
+      }
+
       for (const esc of editingEvento.escalas) {
         if (!esc.id) {
           console.error("Escala has no ID:", esc);
