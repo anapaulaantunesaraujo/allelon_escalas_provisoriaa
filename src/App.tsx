@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
+import { GoogleGenAI } from '@google/genai';
 import { useAuth, AuthProvider } from './AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, setDoc, doc, addDoc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, setDoc, doc, addDoc, updateDoc, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { Evento, EventoWithEscalas, EscalaAtribuicao, UserProfile } from './types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,8 @@ import { ptBR } from 'date-fns/locale';
 import { parseUsersCSV, parseEscalasCSV, mapVolunteersToUsers } from './lib/csv-utils';
 import { generateGoogleCalendarUrl, downloadICS } from './lib/calendar-utils';
 import { Toaster, toast } from 'sonner';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -104,6 +107,21 @@ function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [isImporting, setIsImporting] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [editingEvento, setEditingEvento] = useState<EventoWithEscalas | null>(null);
+
+  const handleUpdateEvento = async () => {
+    if (!editingEvento) return;
+    try {
+      await updateDoc(doc(db, 'eventos', editingEvento.id), {
+        nomeEvento: editingEvento.nomeEvento,
+        dataHoraInicio: editingEvento.dataHoraInicio
+      });
+      toast.success("Evento atualizado com sucesso!");
+      setEditingEvento(null);
+    } catch (err) {
+      toast.error("Erro ao atualizar evento");
+    }
+  };
 
   const handleUpdateUser = async () => {
     if (!editingUser) return;
@@ -119,6 +137,22 @@ function Dashboard() {
     }
   };
 
+  const handleDeleteEvento = async (eventoId: string) => {
+    try {
+      // Delete all escalas for this event
+      const escalasQ = query(collection(db, 'escalas'), where('eventoId', '==', eventoId));
+      const escalasSnap = await getDocs(escalasQ);
+      for (const escDoc of escalasSnap.docs) {
+        await deleteDoc(escDoc.ref);
+      }
+      // Delete event
+      await deleteDoc(doc(db, 'eventos', eventoId));
+      toast.success("Evento e escalas excluídos com sucesso!");
+    } catch (err) {
+      toast.error("Erro ao excluir evento");
+    }
+  };
+
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       setUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
@@ -126,24 +160,22 @@ function Dashboard() {
     
     const q = query(collection(db, 'eventos'), orderBy('dataHoraInicio', 'asc'));
     const unsubEventos = onSnapshot(q, (snapshot) => {
-      const evs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Evento));
-      
-      const unsubEscalas = onSnapshot(collection(db, 'escalas'), (escalaSnap) => {
-        const allEscalas = escalaSnap.docs.map(d => ({ id: d.id, ...d.data() } as EscalaAtribuicao));
-        
-        const combined = evs.map(ev => ({
-          ...ev,
-          escalas: allEscalas.filter(esc => esc.eventoId === ev.id)
-        }));
-        setEventos(combined);
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'escalas'));
-
-      return () => unsubEscalas();
+      setEventos(snapshot.docs.map(d => ({ id: d.id, ...d.data(), escalas: [] } as EventoWithEscalas)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'eventos'));
+
+    const unsubEscalas = onSnapshot(collection(db, 'escalas'), (escalaSnap) => {
+      const allEscalas = escalaSnap.docs.map(d => ({ id: d.id, ...d.data() } as EscalaAtribuicao));
+      
+      setEventos(prevEventos => prevEventos.map(ev => ({
+        ...ev,
+        escalas: allEscalas.filter(esc => esc.eventoId === ev.id)
+      })));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'escalas'));
 
     return () => {
       unsubUsers();
       unsubEventos();
+      unsubEscalas();
     };
   }, []);
 
@@ -215,34 +247,86 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
     reader.readAsText(file);
   };
 
-  const handleEscalaImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePDFImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("PDF Import started");
     if (!e.target.files?.[0]) return;
     setIsImporting(true);
     try {
-      const data = await parseEscalasCSV(e.target.files[0]);
-      // This is a complex mapping. For the demo, we'll assume the CSV has:
-      // Data, Evento, Funcao, Voluntario
-      for (const row of data) {
-        const eventDate = row.Data; // Expected format YYYY-MM-DD
-        const eventName = row.Evento;
-        
-        // 1. Create or find event
-        const eventRef = await addDoc(collection(db, 'eventos'), {
-          nomeEvento: eventName,
-          dataHoraInicio: `${eventDate}T19:00:00Z` // Default time
-        });
-
-        // 2. Create assignment
-        await addDoc(collection(db, 'escalas'), {
-          eventoId: eventRef.id,
-          funcao: row.Funcao,
-          apelidoVoluntarioPDF: row.Voluntario,
-          // usuarioId would be mapped later or by a background process
-        });
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.mjs`;
+      
+      const file = e.target.files[0];
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map((item: any) => item.str).join(" ");
       }
-      toast.success("Escalas importadas com sucesso!");
-    } catch (err) {
-      toast.error("Erro ao importar escalas");
+      const pdfData = { text: fullText };
+      
+      const prompt = `
+        Você é um especialista em extração de dados de escalas de voluntários.
+        O texto abaixo foi extraído de um PDF que contém tabelas de escalas.
+        
+        Sua tarefa é identificar cada evento (data e nome do evento) e, para cada evento, listar os voluntários e suas respectivas funções com base na estrutura da tabela.
+        
+        Texto: "${pdfData.text.substring(0, 15000)}"
+        
+        Retorne APENAS um JSON estruturado exatamente assim:
+        [
+          {
+            "data": "YYYY-MM-DD",
+            "evento": "Nome do Evento",
+            "escalas": [
+              { "funcao": "Função (ex: Vocal, Violão, Som)", "voluntario": "Nome do Voluntário" }
+            ]
+          }
+        ]
+      `;
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+      });
+      const jsonStr = (response.text || '').replace(/```json/g, '').replace(/```/g, '');
+      console.log("PDF Parsing JSON:", jsonStr);
+      const escalas = JSON.parse(jsonStr);
+      
+      for (const item of escalas) {
+        // Check if event already exists
+        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.evento), where('dataHoraInicio', '==', `${item.data}T19:00:00Z`));
+        const querySnapshot = await getDocs(q);
+        
+        let eventRef;
+        if (querySnapshot.empty) {
+          eventRef = await addDoc(collection(db, 'eventos'), {
+            nomeEvento: item.evento,
+            dataHoraInicio: `${item.data}T19:00:00Z`
+          });
+        } else {
+          eventRef = querySnapshot.docs[0].ref;
+        }
+        
+        for (const esc of item.escalas) {
+          // Check if escala already exists for this event
+          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', esc.funcao), where('apelidoVoluntarioPDF', '==', esc.voluntario));
+          const escSnap = await getDocs(escQ);
+          if (escSnap.empty) {
+            await addDoc(collection(db, 'escalas'), {
+              eventoId: eventRef.id,
+              funcao: esc.funcao,
+              apelidoVoluntarioPDF: esc.voluntario
+            });
+          }
+        }
+      }
+      toast.success("Escalas importadas via PDF com sucesso!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Erro ao importar escalas via PDF: ${err.message || err}`);
     } finally {
       setIsImporting(false);
     }
@@ -301,6 +385,32 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
               <Button onClick={handleUpdateUser}>Salvar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!editingEvento} onOpenChange={() => setEditingEvento(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar Evento</DialogTitle>
+            </DialogHeader>
+            {editingEvento && (
+              <div className="space-y-4">
+                <Input 
+                  value={editingEvento.nomeEvento} 
+                  onChange={e => setEditingEvento({...editingEvento, nomeEvento: e.target.value})}
+                  placeholder="Nome do Evento"
+                />
+                <Input 
+                  type="datetime-local"
+                  value={editingEvento.dataHoraInicio.slice(0, 16)} 
+                  onChange={e => setEditingEvento({...editingEvento, dataHoraInicio: e.target.value})}
+                />
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingEvento(null)}>Cancelar</Button>
+              <Button onClick={handleUpdateEvento}>Salvar</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -472,22 +582,31 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                     <CardTitle className="flex items-center gap-2">
                       <CalendarDays className="h-5 w-5" /> Importar Escalas
                     </CardTitle>
-                    <CardDescription>Upload do CSV com as escalas mensais</CardDescription>
+                    <CardDescription>Upload do PDF com as escalas mensais</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <div className="border-2 border-dashed rounded-lg p-6 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
+                      <label className="block border-2 border-dashed rounded-lg p-6 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
                         <Input 
                           type="file" 
-                          accept=".csv" 
-                          className="absolute inset-0 opacity-0 cursor-pointer" 
-                          onChange={handleEscalaImport}
+                          accept=".pdf" 
+                          className="hidden" 
+                          onChange={handlePDFImport}
                           disabled={isImporting}
                         />
-                        <Upload className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                        <p className="text-sm font-medium">Clique ou arraste o arquivo CSV</p>
-                        <p className="text-xs text-slate-400 mt-1">Colunas: Data, Evento, Funcao, Voluntario</p>
-                      </div>
+                        {isImporting ? (
+                          <div className="flex flex-col items-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-2"></div>
+                            <p className="text-sm font-medium text-primary">Processando PDF...</p>
+                          </div>
+                        ) : (
+                          <>
+                            <Upload className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                            <p className="text-sm font-medium">Clique ou arraste o arquivo PDF</p>
+                            <p className="text-xs text-slate-400 mt-1">O sistema extrairá os dados automaticamente</p>
+                          </>
+                        )}
+                      </label>
                     </div>
                   </CardContent>
                 </Card>
@@ -560,8 +679,9 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="sm">Editar</Button>
+                          <TableCell className="text-right flex gap-2 justify-end">
+                            <Button variant="ghost" size="sm" onClick={() => setEditingEvento(ev)}>Editar</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteEvento(ev.id)} className="text-red-500 hover:text-red-700">Excluir</Button>
                           </TableCell>
                         </TableRow>
                       ))}
