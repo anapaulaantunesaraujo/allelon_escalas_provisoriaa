@@ -786,7 +786,7 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           <TabsContent value="calendar" className="space-y-6">
             <div className="mt-4">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <Card className="lg:col-span-1">
+                <Card className="col-span-1 lg:col-span-3">
                   <CardHeader>
                     <CardTitle>Selecione uma Data</CardTitle>
                   </CardHeader>
@@ -795,19 +795,27 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                       mode="single"
                       selected={selectedDate}
                       onSelect={setSelectedDate}
-                      className="rounded-md border p-3"
+                      className="rounded-xl border p-4 shadow-sm bg-white w-full"
                       locale={ptBR}
+                      classNames={{
+                        day_selected: "bg-primary text-primary-foreground font-bold rounded-full h-9 w-9 flex items-center justify-center",
+                        day_today: "bg-slate-100 font-bold rounded-full h-9 w-9 flex items-center justify-center",
+                        day: "h-12 w-full p-0 font-normal aria-selected:opacity-100 hover:bg-slate-100 rounded-lg flex items-center justify-center",
+                        head_cell: "w-full font-medium text-slate-500 text-center",
+                        table: "w-full border-collapse",
+                        day_button: "h-9 w-9 rounded-full flex items-center justify-center hover:bg-slate-200",
+                      }}
                       modifiers={{
                         hasEvent: (date) => eventos.some(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), date)),
                       }}
                       modifiersClassNames={{
-                        hasEvent: "bg-primary text-primary-foreground font-bold rounded-full",
+                        hasEvent: "relative after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-primary",
                       }}
                     />
                   </CardContent>
                 </Card>
 
-                <Card className="lg:col-span-2">
+                <Card className="col-span-1 lg:col-span-3">
                   <CardHeader>
                     <CardTitle>
                       {selectedDate ? format(selectedDate, "dd 'de' MMMM", { locale: ptBR }) : 'Eventos'}
