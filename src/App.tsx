@@ -643,13 +643,15 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                       + Adicionar Voluntário
                     </Button>
                   </div>
-                  {editingEvento.escalas.map((esc, index) => (
+                  {[...editingEvento.escalas].sort((a, b) => a.funcao.localeCompare(b.funcao)).map((esc, index) => (
                     <div key={esc.id} className="flex gap-2 items-center">
                       <Input 
                         value={esc.funcao} 
                         onChange={e => {
+                          // Find original index to update correctly
+                          const originalIndex = editingEvento.escalas.findIndex(e => e.id === esc.id);
                           const newEscalas = [...editingEvento.escalas];
-                          newEscalas[index].funcao = e.target.value;
+                          newEscalas[originalIndex].funcao = e.target.value;
                           setEditingEvento({...editingEvento, escalas: newEscalas});
                         }}
                         className="w-1/3" 
@@ -657,8 +659,9 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                       <Input 
                         value={esc.apelidoVoluntarioPDF} 
                         onChange={e => {
+                          const originalIndex = editingEvento.escalas.findIndex(e => e.id === esc.id);
                           const newEscalas = [...editingEvento.escalas];
-                          newEscalas[index].apelidoVoluntarioPDF = e.target.value;
+                          newEscalas[originalIndex].apelidoVoluntarioPDF = e.target.value;
                           setEditingEvento({...editingEvento, escalas: newEscalas});
                         }}
                       />
@@ -668,8 +671,9 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                             type="checkbox" 
                             checked={esc.isLider || false}
                             onChange={e => {
+                              const originalIndex = editingEvento.escalas.findIndex(e => e.id === esc.id);
                               const newEscalas = [...editingEvento.escalas];
-                              newEscalas[index].isLider = e.target.checked;
+                              newEscalas[originalIndex].isLider = e.target.checked;
                               setEditingEvento({...editingEvento, escalas: newEscalas});
                             }}
                           /> Lider
@@ -679,8 +683,9 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                             type="checkbox" 
                             checked={esc.isBriefing || false}
                             onChange={e => {
+                              const originalIndex = editingEvento.escalas.findIndex(e => e.id === esc.id);
                               const newEscalas = [...editingEvento.escalas];
-                              newEscalas[index].isBriefing = e.target.checked;
+                              newEscalas[originalIndex].isBriefing = e.target.checked;
                               setEditingEvento({...editingEvento, escalas: newEscalas});
                             }}
                           /> Briefing
@@ -779,73 +784,81 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           </TabsContent>
 
           <TabsContent value="calendar" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <Card className="lg:col-span-1">
-                <CardHeader>
-                  <CardTitle>Selecione uma Data</CardTitle>
-                </CardHeader>
-                <CardContent className="flex justify-center">
-                  <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    className="rounded-md border"
-                    locale={ptBR}
-                  />
-                </CardContent>
-              </Card>
+            <div className="mt-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <Card className="lg:col-span-1">
+                  <CardHeader>
+                    <CardTitle>Selecione uma Data</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex justify-center">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      className="rounded-md border p-3"
+                      locale={ptBR}
+                      modifiers={{
+                        hasEvent: (date) => eventos.some(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), date)),
+                      }}
+                      modifiersClassNames={{
+                        hasEvent: "bg-primary text-primary-foreground font-bold rounded-full",
+                      }}
+                    />
+                  </CardContent>
+                </Card>
 
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle>
-                    {selectedDate ? format(selectedDate, "dd 'de' MMMM", { locale: ptBR }) : 'Eventos'}
-                  </CardTitle>
-                  <CardDescription>Voluntários escalados para este dia</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {selectedDate && (
-                    <div className="space-y-6">
-                      {eventos
-                        .filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate))
-                        .map(ev => (
-                          <div key={ev.id} className="space-y-4">
-                            <div className="flex items-center justify-between border-b pb-2">
-                              <h3 className="font-bold text-lg text-primary">{ev.nomeEvento}</h3>
-                              <span className="text-sm text-slate-500">{format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'HH:mm')}</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {ev.escalas.length > 0 ? (
-                                ev.escalas.map(esc => (
-                                  <div key={esc.id} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-xs">
-                                    <div>
-                                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{esc.funcao}</p>
-                                      <p className="font-medium">{esc.apelidoVoluntarioPDF}</p>
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>
+                      {selectedDate ? format(selectedDate, "dd 'de' MMMM", { locale: ptBR }) : 'Eventos'}
+                    </CardTitle>
+                    <CardDescription>Voluntários escalados para este dia</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedDate && (
+                      <div className="space-y-6">
+                        {eventos
+                          .filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate))
+                          .map(ev => (
+                            <div key={ev.id} className="space-y-4">
+                              <div className="flex items-center justify-between border-b pb-2">
+                                <h3 className="font-bold text-lg text-primary">{ev.nomeEvento}</h3>
+                                <span className="text-sm text-slate-500">{format(new Date(ev.dataHoraInicio || new Date().toISOString()), 'HH:mm')}</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {ev.escalas.length > 0 ? (
+                                  [...ev.escalas].sort((a, b) => a.funcao.localeCompare(b.funcao)).map(esc => (
+                                    <div key={esc.id} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-xs">
+                                      <div>
+                                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{esc.funcao}</p>
+                                        <p className="font-medium">{esc.apelidoVoluntarioPDF}</p>
+                                      </div>
+                                      {!esc.usuarioId && (
+                                        <Popover>
+                                          <PopoverTrigger>
+                                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                          </PopoverTrigger>
+                                          <PopoverContent className="text-xs">
+                                            Voluntário não identificado no sistema.
+                                          </PopoverContent>
+                                        </Popover>
+                                      )}
                                     </div>
-                                    {!esc.usuarioId && (
-                                      <Popover>
-                                        <PopoverTrigger>
-                                          <AlertTriangle className="h-4 w-4 text-amber-500" />
-                                        </PopoverTrigger>
-                                        <PopoverContent className="text-xs">
-                                          Voluntário não identificado no sistema.
-                                        </PopoverContent>
-                                      </Popover>
-                                    )}
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="text-sm text-slate-400 italic">Nenhuma escala definida para este evento.</p>
-                              )}
+                                  ))
+                                ) : (
+                                  <p className="text-sm text-slate-400 italic">Nenhuma escala definida para este evento.</p>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      {eventos.filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate)).length === 0 && (
-                        <p className="text-center py-8 text-slate-400">Nenhum evento programado para este dia.</p>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                          ))}
+                        {eventos.filter(ev => isSameDay(new Date(ev.dataHoraInicio || new Date().toISOString()), selectedDate)).length === 0 && (
+                          <p className="text-center py-8 text-slate-400">Nenhum evento programado para este dia.</p>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </TabsContent>
 
