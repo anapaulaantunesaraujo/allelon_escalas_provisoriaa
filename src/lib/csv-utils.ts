@@ -6,13 +6,14 @@ export const parseUsersCSV = (file: File): Promise<Partial<UserProfile>[]> => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      delimiter: ';',
       complete: (results) => {
         const users = results.data.map((row: any) => ({
           nomeCompleto: row.Nome_Completo,
           apelidoPDF: row.Apelido_PDF,
           email: row.Email,
           funcoesAptas: row.Funcoes_Aptas ? row.Funcoes_Aptas.split(',').map((f: string) => f.trim()) : [],
-          nivelAcesso: (row.Nivel_Acesso?.toLowerCase() === 'admin' ? 'admin' : 'user') as any,
+          nivelAcesso: (row.Nivel_Acesso?.toLowerCase().includes('admin') ? 'admin' : 'user') as any,
         }));
         resolve(users);
       },
@@ -26,6 +27,7 @@ export const parseEscalasCSV = (file: File): Promise<any[]> => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      delimiter: ';',
       complete: (results) => resolve(results.data),
       error: (error) => reject(error),
     });

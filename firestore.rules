@@ -1,0 +1,120 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - nomeCompleto: string (required)
+    //   - apelidoPDF: string (required)
+    //   - email: string (required, format: email)
+    //   - funcoesAptas: list (optional)
+    //   - nivelAcesso: string (required, enum: ['admin', 'user'])
+    //
+    // Collection: eventos
+    // Document ID: {eventoId}
+    // Fields:
+    //   - nomeEvento: string (required)
+    //   - dataHoraInicio: string (required, ISO 8601)
+    //
+    // Collection: escalas
+    // Document ID: {escalaId}
+    // Fields:
+    //   - eventoId: string (required)
+    //   - funcao: string (required)
+    //   - apelidoVoluntarioPDF: string (required)
+    //   - usuarioId: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserData().nivelAcesso == 'admin' ||
+        (request.auth.token.email == "anapaula.antunesaraujo@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Validation Functions
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['nomeCompleto', 'apelidoPDF', 'email', 'nivelAcesso']) &&
+             data.nomeCompleto is string && data.nomeCompleto.size() > 0 && data.nomeCompleto.size() < 100 &&
+             data.apelidoPDF is string && data.apelidoPDF.size() > 0 && data.apelidoPDF.size() < 50 &&
+             isValidEmail(data.email) &&
+             data.nivelAcesso in ['admin', 'user'];
+    }
+
+    function isValidEvento(data) {
+      return data.keys().hasAll(['nomeEvento', 'dataHoraInicio']) &&
+             data.nomeEvento is string && data.nomeEvento.size() > 0 && data.nomeEvento.size() < 200 &&
+             isValidDateString(data.dataHoraInicio);
+    }
+
+    function isValidEscala(data) {
+      return data.keys().hasAll(['eventoId', 'funcao', 'apelidoVoluntarioPDF']) &&
+             data.eventoId is string &&
+             data.funcao is string && data.funcao.size() > 0 && data.funcao.size() < 100 &&
+             data.apelidoVoluntarioPDF is string && data.apelidoVoluntarioPDF.size() > 0 && data.apelidoVoluntarioPDF.size() < 50 &&
+             (!('usuarioId' in data) || data.usuarioId is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can read their own profile. Admins can read all profiles.
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Users can create their own profile if it's not an admin role (unless they are already admin)
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    (isOwner(userId) && (request.resource.data.nivelAcesso == 'user' || isAdmin()));
+      
+      // Only admins can update roles. Users can update their own non-role info.
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || (isOwner(userId) && request.resource.data.nivelAcesso == resource.data.nivelAcesso)
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    match /eventos/{eventoId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidEvento(request.resource.data);
+    }
+
+    match /escalas/{escalaId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidEscala(request.resource.data);
+    }
+  }
+}

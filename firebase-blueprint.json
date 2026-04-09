@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile information and access levels.",
+      "type": "object",
+      "properties": {
+        "nomeCompleto": { "type": "string" },
+        "apelidoPDF": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "funcoesAptas": { "type": "array", "items": { "type": "string" } },
+        "nivelAcesso": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["nomeCompleto", "apelidoPDF", "email", "nivelAcesso"]
+    },
+    "Evento": {
+      "title": "Evento",
+      "description": "Church event information.",
+      "type": "object",
+      "properties": {
+        "nomeEvento": { "type": "string" },
+        "dataHoraInicio": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nomeEvento", "dataHoraInicio"]
+    },
+    "EscalaAtribuicao": {
+      "title": "Escala Atribuição",
+      "description": "Assignment of a volunteer to a specific function in an event.",
+      "type": "object",
+      "properties": {
+        "eventoId": { "type": "string" },
+        "funcao": { "type": "string" },
+        "apelidoVoluntarioPDF": { "type": "string" },
+        "usuarioId": { "type": "string" }
+      },
+      "required": ["eventoId", "funcao", "apelidoVoluntarioPDF"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles."
+    },
+    "/eventos/{eventoId}": {
+      "schema": "Evento",
+      "description": "Collection of church events."
+    },
+    "/escalas/{escalaId}": {
+      "schema": "EscalaAtribuicao",
+      "description": "Collection of volunteer assignments."
+    }
+  }
+}
