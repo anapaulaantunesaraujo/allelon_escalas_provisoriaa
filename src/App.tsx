@@ -474,6 +474,63 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
     reader.readAsText(file);
   };
 
+  const parseDate = (dataStr: string, horarioStr: string) => {
+    const months: { [key: string]: number } = {
+      'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
+      'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
+    };
+    
+    const dateParts = dataStr.toLowerCase().split(' ');
+    const day = parseInt(dateParts[0]);
+    const month = months[dateParts[2]];
+    const year = new Date().getFullYear(); // Assuming current year
+    
+    const dateObj = new Date(Date.UTC(year, month, day));
+    const [hours, minutes] = horarioStr.split(':').map(Number);
+    dateObj.setUTCHours(hours, minutes);
+    
+    return dateObj;
+  };
+
+  const getOrCreateEvent = async (evento: any) => {
+    const dateObj = parseDate(evento.Data, evento.Horario);
+    const isoDate = dateObj.toISOString();
+
+    const q = query(collection(db, 'eventos'), where('nomeEvento', '==', evento.Nome_Evento));
+    const querySnapshot = await getDocs(q);
+    
+    let eventRef = querySnapshot.docs.find(doc => {
+      const dataHora = new Date(doc.data().dataHoraInicio);
+      
+      const eventYear = dataHora.getUTCFullYear();
+      const eventMonth = dataHora.getUTCMonth();
+      const eventDate = dataHora.getUTCDate();
+      const eventHours = dataHora.getUTCHours();
+      const eventMinutes = dataHora.getUTCMinutes();
+      
+      const itemYear = dateObj.getUTCFullYear();
+      const itemMonth = dateObj.getUTCMonth();
+      const itemDate = dateObj.getUTCDate();
+      const itemHours = dateObj.getUTCHours();
+      const itemMinutes = dateObj.getUTCMinutes();
+      
+      return eventYear === itemYear && 
+             eventMonth === itemMonth && 
+             eventDate === itemDate && 
+             eventHours === itemHours && 
+             eventMinutes === itemMinutes;
+    })?.ref;
+
+    if (!eventRef) {
+      eventRef = await addDoc(collection(db, 'eventos'), {
+        nomeEvento: evento.Nome_Evento,
+        dataHoraInicio: isoDate,
+        isEventoEspecial: false
+      });
+    }
+    return eventRef;
+  };
+
   const handleXlsxImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log("XLSX Import started");
     if (!e.target.files?.[0]) return;
@@ -484,43 +541,35 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       const XLSX = await import('xlsx');
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       
-      // Use the first sheet only
       const worksheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[worksheetName];
-      
-      // Convert to JSON, raw: false ensures we get formatted values (handles formulas)
       const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false }) as any[][];
 
+      const eventos = [];
       const escalas = [];
       let currentData = "";
       let currentHorario = "";
       let currentEvento = "";
       
-      // Iterate through rows to extract data based on visual structure
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         if (!row || row.length === 0) continue;
 
-        // Check if row has date/time info (Column A)
         if (row[0] && typeof row[0] === 'string' && row[0].includes('de')) {
-          currentData = row[0]; // e.g., "06 de Abril"
-          // Extract time if present in the same cell or next
+          currentData = row[0];
           if (row[0].includes('h')) {
              const parts = row[0].split(' ');
              currentHorario = parts[parts.length - 1].replace('h', ':00');
           }
         }
         
-        // Check if row has event name (Column C-I, usually merged or specific row)
-        // Based on screenshot, event name is in a row above the functions
-        if (row[2] && typeof row[2] === 'string' && !['Vocal', 'Violão'].includes(row[2])) {
+        if (row[2] && typeof row[2] === 'string' && !['Vocal', 'Violão', 'Guitarra', 'Baixo', 'Bateria', 'Teclado', 'Som', 'Iluminação', 'Projeção'].includes(row[2])) {
            currentEvento = row[2];
+           eventos.push({ Data: currentData, Horario: currentHorario, Nome_Evento: currentEvento });
         }
 
-        // Check for volunteer rows (Column C onwards)
         if (row[2] === 'Vocal') {
-          // The next rows contain the volunteers
-          for (let j = 1; j <= 3; j++) { // Assuming max 3 volunteers per function
+          for (let j = 1; j <= 3; j++) {
             const volRow = data[i + j];
             if (volRow && volRow[2]) {
                escalas.push({
@@ -533,7 +582,10 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
             }
           }
         }
-        // Add similar logic for other functions if needed...
+      }
+      
+      for (const evento of eventos) {
+        await getOrCreateEvent(evento);
       }
       
       await processEscalas(escalas);
