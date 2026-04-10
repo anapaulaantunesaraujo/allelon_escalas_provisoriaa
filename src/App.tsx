@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { useAuth, AuthProvider } from './AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
@@ -22,8 +21,6 @@ import { ptBR } from 'date-fns/locale';
 import { parseUsersCSV, parseEscalasCSV, mapVolunteersToUsers } from './lib/csv-utils';
 import { generateGoogleCalendarUrl, downloadICS } from './lib/calendar-utils';
 import { Toaster, toast } from 'sonner';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -522,29 +519,48 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
     })?.ref;
 
     if (!eventRef) {
-      eventRef = await addDoc(collection(db, 'eventos'), {
-        nomeEvento: evento.Nome_Evento,
-        dataHoraInicio: isoDate,
-        isEventoEspecial: false
-      });
+      console.log(`Creating new event: ${evento.Nome_Evento}`);
+      try {
+        eventRef = await addDoc(collection(db, 'eventos'), {
+          nomeEvento: evento.Nome_Evento,
+          dataHoraInicio: isoDate,
+          isEventoEspecial: false
+        });
+        console.log(`Created event with ID: ${eventRef.id}`);
+      } catch (err) {
+        console.error("Error creating event:", err);
+        return null;
+      }
+    } else {
+      console.log(`Found existing event: ${eventRef.id}`);
     }
     return eventRef;
   };
 
   const handleXlsxImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log("XLSX Import started");
-    if (!e.target.files?.[0]) return;
+    const file = e.target.files?.[0];
+    console.log("File selected:", file);
+    if (!file) return;
     setIsImporting(true);
     try {
-      const file = e.target.files[0];
       const arrayBuffer = await file.arrayBuffer();
+      console.log("ArrayBuffer loaded");
       const XLSX = await import('xlsx');
+      console.log("XLSX library loaded");
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      console.log("Workbook read:", workbook);
       
       const worksheetName = workbook.SheetNames[0];
+      console.log("Worksheet name:", worksheetName);
       const worksheet = workbook.Sheets[worksheetName];
       // Convert to JSON for Gemini to process
       const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+      console.log("Data extracted:", data);
+      
+      // Limit data sent to Gemini to avoid context limits
+      const limitedData = data.slice(0, 50);
+      console.log("Sending limited data to Gemini (first 50 rows):", limitedData);
 
       const prompt = `
         Você é um assistente especialista em extração de dados. Extraia os dados da planilha de escalas de voluntários abaixo.
@@ -567,15 +583,23 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           }
         ]
         
-        Dados da Planilha: ${JSON.stringify(data)}
+        Dados da Planilha (limitados): ${JSON.stringify(limitedData)}
       `;
 
-      const result = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: prompt,
+      const response = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
       });
 
-      const jsonResponse = JSON.parse(result.text() || '[]');
+      if (!response.ok) {
+        throw new Error('Failed to call Gemini API');
+      }
+
+      const dataResponse = await response.json();
+      const jsonResponse = JSON.parse(dataResponse.text || '[]');
 
       for (const item of jsonResponse) {
         // Create/Get Event
@@ -584,6 +608,11 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
           Horario: item.data_evento.split(' ').pop()?.replace('h', ':00') || '00:00',
           Nome_Evento: item.nome_evento
         });
+
+        if (!eventRef) {
+          console.error(`Failed to create or find event: ${item.nome_evento}`);
+          continue;
+        }
 
         // Add scales
         for (const vol of item.voluntarios) {
