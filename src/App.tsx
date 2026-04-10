@@ -474,115 +474,120 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
     reader.readAsText(file);
   };
 
-  const handlePDFImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log("PDF Import started");
+  const handleXlsxImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("XLSX Import started");
     if (!e.target.files?.[0]) return;
     setIsImporting(true);
     try {
-      const pdfjsLib = await import('pdfjs-dist');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.mjs`;
-      
       const file = e.target.files[0];
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       
-      let fullText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        
-        // Include positioning data (transform) to help the AI understand the layout
-        fullText += textContent.items.map((item: any) => {
-          const x = item.transform[4];
-          const y = item.transform[5];
-          return `[x:${x.toFixed(0)},y:${y.toFixed(0)}] ${item.str}`;
-        }).join(" ");
-      }
-      const pdfData = { text: fullText };
+      // Use the first sheet only
+      const worksheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[worksheetName];
       
-      const prompt = `
-        Você é um assistente especialista em extração de dados. Vou te enviar o conteúdo extraído de um PDF de escalas de voluntários de uma igreja. A formatação original foi perdida, então você precisa aplicar lógica para agrupar os dados.
+      // Convert to JSON, raw: false ensures we get formatted values (handles formulas)
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false }) as any[][];
 
-        Regras de Extração:
-        1. Identifique os blocos de eventos: Procure por datas seguidas de horários (Ex: '06 de Abril Segunda 20h' ou '12 de Abril Domingo 9h30' ).
-        2. Identifique o Evento: Logo após ou próximo à data, procure o nome do culto/evento (Ex: 'CULTO DA CIDADE' , 'TAMO JUNTO-2026' , 'ALMOÇO SOLIDÁRIO' ). Se não houver nome claro, chame de 'Culto Regular'.
-        3. Mapeie as Funções: Para cada bloco de data, procure as seguintes funções padrão: Vocal, Violão, Guitarra, Baixo, Bateria, Teclado, Som, Iluminação e Projeção.
-        4. Associe os Nomes: O nome do voluntário geralmente aparece nas linhas imediatamente após a função. Atenção: Pode haver mais de uma pessoa para a mesma função (Ex: 'Vocal', e na sequência 'Isabely', 'Pedro' ). Se isso acontecer, crie uma linha separada para cada pessoa. Se não houver nome após a função, ignore-a.
-        
-        CRÍTICO - ALINHAMENTO DE LINHAS (Row-based parsing):
-        O texto extraído agora contém coordenadas de posição no formato [x:...,y:...]. Use estas coordenadas para reconstruir a estrutura da tabela:
-        - A data que está na primeira coluna (menor valor de x) deve ser vinculada ÚNICA e EXCLUSIVAMENTE às funções e nomes que compartilham a exata mesma faixa horizontal (coordenada y).
-        - Se houver um espaço em branco entre a data e os voluntários, NÃO pule para a próxima linha; mantenha a leitura na mesma altura horizontal (valor de y similar) até o fim da página.
-        - Não misture voluntários de uma linha superior (valor de y maior) com a data da linha inferior (valor de y menor).
-        - Use o valor de 'y' para agrupar logicamente os itens na mesma linha.
-        
-        5. Formato de Saída (Obrigatório): Não me responda com texto comum. Retorne APENAS um formato de tabela CSV, usando ponto e vírgula (;) como separador, com o seguinte cabeçalho exato: Data;Horario;Nome_Evento;Funcao;Voluntario.
-        
-        Regras de Formatação de Dados:
-        - Data: Deve estar no formato YYYY-MM-DD (ex: 2026-04-06).
-        - Horario: Deve estar no formato HH:mm (ex: 20:00, 09:30).
-        
-        Não use blocos de código markdown na resposta, apenas o texto bruto do CSV.
-        
-        Texto: "${pdfData.text.substring(0, 20000)}"
-      `;
+      const escalas = [];
+      let currentData = "";
+      let currentHorario = "";
+      let currentEvento = "";
       
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-      });
-      const csvStr = (response.text || '').replace(/```csv/g, '').replace(/```/g, '').trim();
-      console.log("PDF Parsing CSV:", csvStr);
-      
-      const Papa = await import('papaparse');
-      const results = Papa.parse(csvStr, { header: true, delimiter: ';' });
-      const escalas = results.data as any[];
-      
-      for (const item of escalas) {
-        if (!item.Data || !item.Nome_Evento) continue;
+      // Iterate through rows to extract data based on visual structure
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        if (!row || row.length === 0) continue;
 
-        // Parse date and time
-        const [year, month, day] = item.Data.split('-').map(Number);
-        const dateObj = new Date(year, month - 1, day);
-        
-        const [hours, minutes] = item.Horario.split(':').map(Number);
-        dateObj.setHours(hours, minutes);
-        const isoDate = dateObj.toISOString();
-
-        // Check if event already exists
-        const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.Nome_Evento));
-        const querySnapshot = await getDocs(q);
-        
-        let eventRef = querySnapshot.docs.find(doc => doc.data().dataHoraInicio.startsWith(item.Data))?.ref;
-
-        if (!eventRef) {
-          eventRef = await addDoc(collection(db, 'eventos'), {
-            nomeEvento: item.Nome_Evento,
-            dataHoraInicio: isoDate,
-            isEventoEspecial: false
-          });
-        }
-        
-        if (item.Voluntario && item.Funcao) {
-          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', item.Funcao), where('apelidoVoluntarioPDF', '==', item.Voluntario));
-          const escSnap = await getDocs(escQ);
-          if (escSnap.empty) {
-            await addDoc(collection(db, 'escalas'), {
-              eventoId: eventRef.id,
-              funcao: item.Funcao,
-              apelidoVoluntarioPDF: item.Voluntario,
-              isLider: false,
-              isBriefing: false
-            });
+        // Check if row has date/time info (Column A)
+        if (row[0] && typeof row[0] === 'string' && row[0].includes('de')) {
+          currentData = row[0]; // e.g., "06 de Abril"
+          // Extract time if present in the same cell or next
+          if (row[0].includes('h')) {
+             const parts = row[0].split(' ');
+             currentHorario = parts[parts.length - 1].replace('h', ':00');
           }
         }
+        
+        // Check if row has event name (Column C-I, usually merged or specific row)
+        // Based on screenshot, event name is in a row above the functions
+        if (row[2] && typeof row[2] === 'string' && !['Vocal', 'Violão'].includes(row[2])) {
+           currentEvento = row[2];
+        }
+
+        // Check for volunteer rows (Column C onwards)
+        if (row[2] === 'Vocal') {
+          // The next rows contain the volunteers
+          for (let j = 1; j <= 3; j++) { // Assuming max 3 volunteers per function
+            const volRow = data[i + j];
+            if (volRow && volRow[2]) {
+               escalas.push({
+                 Data: currentData,
+                 Horario: currentHorario,
+                 Nome_Evento: currentEvento,
+                 Funcao: 'Vocal',
+                 Voluntario: volRow[2]
+               });
+            }
+          }
+        }
+        // Add similar logic for other functions if needed...
       }
-      toast.success("Escalas importadas via PDF com sucesso!");
+      
+      await processEscalas(escalas);
+      toast.success("Escalas importadas via Excel com sucesso!");
     } catch (err: any) {
       console.error(err);
-      toast.error(`Erro ao importar escalas via PDF: ${err.message || err}`);
+      toast.error(`Erro ao importar escalas via Excel: ${err.message || err}`);
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const processEscalas = async (escalas: any[]) => {
+    for (const item of escalas) {
+      if (!item.Data || !item.Nome_Evento) continue;
+
+      // Parse date and time
+      const dateObj = new Date(item.Data);
+      const [hours, minutes] = item.Horario.split(':').map(Number);
+      dateObj.setHours(hours, minutes);
+      const isoDate = dateObj.toISOString();
+      const dateStr = dateObj.toISOString().split('T')[0];
+
+      // Check if event already exists (same name, same date, same time)
+      const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.Nome_Evento));
+      const querySnapshot = await getDocs(q);
+      
+      // Match by date AND time
+      let eventRef = querySnapshot.docs.find(doc => {
+        const dataHora = doc.data().dataHoraInicio;
+        return dataHora.startsWith(dateStr) && dataHora.includes(item.Horario);
+      })?.ref;
+
+      if (!eventRef) {
+        eventRef = await addDoc(collection(db, 'eventos'), {
+          nomeEvento: item.Nome_Evento,
+          dataHoraInicio: isoDate,
+          isEventoEspecial: false
+        });
+      }
+      
+      if (item.Voluntario && item.Funcao) {
+        const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', item.Funcao), where('apelidoVoluntarioPDF', '==', item.Voluntario));
+        const escSnap = await getDocs(escQ);
+        if (escSnap.empty) {
+          await addDoc(collection(db, 'escalas'), {
+            eventoId: eventRef.id,
+            funcao: item.Funcao,
+            apelidoVoluntarioPDF: item.Voluntario,
+            isLider: false,
+            isBriefing: false
+          });
+        }
+      }
     }
   };
 
@@ -986,20 +991,28 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
                       <label className="block border-2 border-dashed rounded-lg p-6 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
                         <Input 
                           type="file" 
-                          accept=".pdf" 
+                          accept=".pdf,.xlsx,.xls" 
                           className="hidden" 
-                          onChange={handlePDFImport}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.name.endsWith('.pdf')) {
+                              handlePDFImport(e);
+                            } else {
+                              handleXlsxImport(e);
+                            }
+                          }}
                           disabled={isImporting}
                         />
                         {isImporting ? (
                           <div className="flex flex-col items-center">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-2"></div>
-                            <p className="text-sm font-medium text-primary">Processando PDF...</p>
+                            <p className="text-sm font-medium text-primary">Processando arquivo...</p>
                           </div>
                         ) : (
                           <>
                             <Upload className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                            <p className="text-sm font-medium">Clique ou arraste o arquivo PDF</p>
+                            <p className="text-sm font-medium">Clique ou arraste o arquivo PDF ou Excel</p>
                             <p className="text-xs text-slate-400 mt-1">O sistema extrairá os dados automaticamente</p>
                           </>
                         )}
