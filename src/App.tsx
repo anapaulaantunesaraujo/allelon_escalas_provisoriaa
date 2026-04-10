@@ -552,20 +552,20 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
 
       // Parse date and time
       // Excel often gives date strings like "06 de Abril"
-      // We need to convert this to a valid Date object
       const months: { [key: string]: number } = {
-        'Janeiro': 0, 'Fevereiro': 1, 'Março': 2, 'Abril': 3, 'Maio': 4, 'Junho': 5,
-        'Julho': 6, 'Agosto': 7, 'Setembro': 8, 'Outubro': 9, 'Novembro': 10, 'Dezembro': 11
+        'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
+        'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
       };
       
-      const dateParts = item.Data.split(' ');
+      const dateParts = item.Data.toLowerCase().split(' ');
       const day = parseInt(dateParts[0]);
       const month = months[dateParts[2]];
       const year = new Date().getFullYear(); // Assuming current year
       
-      const dateObj = new Date(year, month, day);
+      // Use UTC to create the date to avoid local timezone shifts
+      const dateObj = new Date(Date.UTC(year, month, day));
       const [hours, minutes] = item.Horario.split(':').map(Number);
-      dateObj.setHours(hours, minutes);
+      dateObj.setUTCHours(hours, minutes);
       
       if (isNaN(dateObj.getTime())) {
         console.error("Invalid date:", item.Data, item.Horario);
