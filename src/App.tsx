@@ -551,11 +551,29 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       if (!item.Data || !item.Nome_Evento) continue;
 
       // Parse date and time
-      const dateObj = new Date(item.Data);
+      // Excel often gives date strings like "06 de Abril"
+      // We need to convert this to a valid Date object
+      const months: { [key: string]: number } = {
+        'Janeiro': 0, 'Fevereiro': 1, 'Março': 2, 'Abril': 3, 'Maio': 4, 'Junho': 5,
+        'Julho': 6, 'Agosto': 7, 'Setembro': 8, 'Outubro': 9, 'Novembro': 10, 'Dezembro': 11
+      };
+      
+      const dateParts = item.Data.split(' ');
+      const day = parseInt(dateParts[0]);
+      const month = months[dateParts[2]];
+      const year = new Date().getFullYear(); // Assuming current year
+      
+      const dateObj = new Date(year, month, day);
       const [hours, minutes] = item.Horario.split(':').map(Number);
       dateObj.setHours(hours, minutes);
+      
+      if (isNaN(dateObj.getTime())) {
+        console.error("Invalid date:", item.Data, item.Horario);
+        continue;
+      }
+      
       const isoDate = dateObj.toISOString();
-      const dateStr = dateObj.toISOString().split('T')[0];
+      const dateStr = isoDate.split('T')[0];
 
       // Check if event already exists (same name, same date, same time)
       const q = query(collection(db, 'eventos'), where('nomeEvento', '==', item.Nome_Evento));
@@ -563,8 +581,30 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       
       // Match by date AND time
       let eventRef = querySnapshot.docs.find(doc => {
-        const dataHora = doc.data().dataHoraInicio;
-        return dataHora.startsWith(dateStr) && dataHora.includes(item.Horario);
+        const dataHora = new Date(doc.data().dataHoraInicio);
+        
+        // Ensure we are comparing the same components
+        const eventYear = dataHora.getUTCFullYear();
+        const eventMonth = dataHora.getUTCMonth();
+        const eventDate = dataHora.getUTCDate();
+        const eventHours = dataHora.getUTCHours();
+        const eventMinutes = dataHora.getUTCMinutes();
+        
+        const itemDateObj = new Date(isoDate);
+        const itemYear = itemDateObj.getUTCFullYear();
+        const itemMonth = itemDateObj.getUTCMonth();
+        const itemDate = itemDateObj.getUTCDate();
+        const itemHours = itemDateObj.getUTCHours();
+        const itemMinutes = itemDateObj.getUTCMinutes();
+        
+        const match = eventYear === itemYear && 
+                      eventMonth === itemMonth && 
+                      eventDate === itemDate && 
+                      eventHours === itemHours && 
+                      eventMinutes === itemMinutes;
+                      
+        console.log(`Checking match for ${item.Nome_Evento}: DB(${eventYear}-${eventMonth+1}-${eventDate} ${eventHours}:${eventMinutes}) vs Item(${itemYear}-${itemMonth+1}-${itemDate} ${itemHours}:${itemMinutes}) -> ${match}`);
+        return match;
       })?.ref;
 
       if (!eventRef) {
