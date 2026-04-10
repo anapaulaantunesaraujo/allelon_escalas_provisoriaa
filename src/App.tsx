@@ -543,52 +543,79 @@ Jeniffer Borges;Jeni;jenifferborges94@gmail.com;Projeção;Usuário`;
       
       const worksheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[worksheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false }) as any[][];
+      // Convert to JSON for Gemini to process
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
 
-      const eventos = [];
-      const escalas = [];
-      let currentData = "";
-      let currentHorario = "";
-      let currentEvento = "";
-      
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-        if (!row || row.length === 0) continue;
+      const prompt = `
+        Você é um assistente especialista em extração de dados. Extraia os dados da planilha de escalas de voluntários abaixo.
+        
+        Siga estas regras lógicas:
+        1. Aba Principal: Processar apenas a primeira aba.
+        2. Cabeçalho Global: Ignorar títulos superiores.
+        3. Gatilhos de Início de Evento: Identifique eventos baseados na Coluna A (Data/Hora).
+        4. Mapeamento: Extraia Data/Hora, Nome do Evento, Staff, Funções e Voluntários conforme a estrutura visual descrita.
+        5. Eventos Vazios: Se um evento for identificado mas não houver voluntários, registre-o mesmo assim com voluntários vazios.
+        6. Normalização: Limpe nomes de voluntários.
 
-        if (row[0] && typeof row[0] === 'string' && row[0].includes('de')) {
-          currentData = row[0];
-          if (row[0].includes('h')) {
-             const parts = row[0].split(' ');
-             currentHorario = parts[parts.length - 1].replace('h', ':00');
+        Formato de Saída (Obrigatório): Retorne APENAS um JSON seguindo esta estrutura:
+        [
+          {
+            "data_evento": "String",
+            "nome_evento": "String",
+            "voluntarios": [{ "funcao": "String", "nome": "String" }],
+            "staff": ["String"]
+          }
+        ]
+        
+        Dados da Planilha: ${JSON.stringify(data)}
+      `;
+
+      const result = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: prompt,
+      });
+
+      const jsonResponse = JSON.parse(result.text() || '[]');
+
+      for (const item of jsonResponse) {
+        // Create/Get Event
+        const eventRef = await getOrCreateEvent({
+          Data: item.data_evento.split(' ')[0], // Simplistic date extraction for getOrCreateEvent
+          Horario: item.data_evento.split(' ').pop()?.replace('h', ':00') || '00:00',
+          Nome_Evento: item.nome_evento
+        });
+
+        // Add scales
+        for (const vol of item.voluntarios) {
+          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', vol.funcao), where('apelidoVoluntarioPDF', '==', vol.nome));
+          const escSnap = await getDocs(escQ);
+          if (escSnap.empty) {
+            await addDoc(collection(db, 'escalas'), {
+              eventoId: eventRef.id,
+              funcao: vol.funcao,
+              apelidoVoluntarioPDF: vol.nome,
+              isLider: false,
+              isBriefing: false
+            });
           }
         }
         
-        if (row[2] && typeof row[2] === 'string' && !['Vocal', 'Violão', 'Guitarra', 'Baixo', 'Bateria', 'Teclado', 'Som', 'Iluminação', 'Projeção'].includes(row[2])) {
-           currentEvento = row[2];
-           eventos.push({ Data: currentData, Horario: currentHorario, Nome_Evento: currentEvento });
-        }
-
-        if (row[2] === 'Vocal') {
-          for (let j = 1; j <= 3; j++) {
-            const volRow = data[i + j];
-            if (volRow && volRow[2]) {
-               escalas.push({
-                 Data: currentData,
-                 Horario: currentHorario,
-                 Nome_Evento: currentEvento,
-                 Funcao: 'Vocal',
-                 Voluntario: volRow[2]
-               });
-            }
+        // Add staff
+        for (const staffName of item.staff) {
+          const escQ = query(collection(db, 'escalas'), where('eventoId', '==', eventRef.id), where('funcao', '==', 'Staff'), where('apelidoVoluntarioPDF', '==', staffName));
+          const escSnap = await getDocs(escQ);
+          if (escSnap.empty) {
+            await addDoc(collection(db, 'escalas'), {
+              eventoId: eventRef.id,
+              funcao: 'Staff',
+              apelidoVoluntarioPDF: staffName,
+              isLider: false,
+              isBriefing: false
+            });
           }
         }
       }
       
-      for (const evento of eventos) {
-        await getOrCreateEvent(evento);
-      }
-      
-      await processEscalas(escalas);
       toast.success("Escalas importadas via Excel com sucesso!");
     } catch (err: any) {
       console.error(err);
